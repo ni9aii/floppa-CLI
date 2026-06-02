@@ -108,7 +108,14 @@ pub fn ensure_interface(
 pub fn ensure_awg_interface(awg: &AmneziaWgConfig, private_key: &str) -> Result<()> {
     let interface = &awg.interface;
     if interface_exists(interface) {
-        debug!(interface, "AmneziaWG interface already exists");
+        // Interface persists across daemon restarts. Reconcile the obfuscation params from config
+        // (via device-level `awg set`, which leaves peers + key + listen-port intact) so changes
+        // to the params take effect on restart without a manual interface recreation.
+        debug!(
+            interface,
+            "AmneziaWG interface exists; reconciling obfuscation params"
+        );
+        reconcile_awg_obfuscation(interface, &awg.obfuscation)?;
         return Ok(());
     }
 
@@ -189,6 +196,49 @@ fn build_awg_setconf(awg: &AmneziaWgConfig, private_key: &str) -> String {
         }
     }
     s
+}
+
+/// Re-apply AmneziaWG obfuscation params to an existing interface via device-level `awg set`.
+/// Unlike `awg setconf`, this leaves peers, private key, and listen port untouched, so it can
+/// reconcile config changes on a live interface without dropping connections.
+fn reconcile_awg_obfuscation(
+    interface: &str,
+    o: &floppa_core::config::AwgObfuscation,
+) -> Result<()> {
+    let mut args: Vec<String> = vec!["set".into(), interface.into()];
+    for (k, v) in [
+        ("jc", o.jc.to_string()),
+        ("jmin", o.jmin.to_string()),
+        ("jmax", o.jmax.to_string()),
+        ("s1", o.s1.to_string()),
+        ("s2", o.s2.to_string()),
+        ("s3", o.s3.to_string()),
+        ("s4", o.s4.to_string()),
+        ("h1", o.h1.clone()),
+        ("h2", o.h2.clone()),
+        ("h3", o.h3.clone()),
+        ("h4", o.h4.clone()),
+    ] {
+        args.push(k.into());
+        args.push(v);
+    }
+    // I-packets are initiator-only; the responder (server) doesn't send them, but set any that
+    // are configured for completeness. (Empty slots are left as-is.)
+    for (n, val) in [(1, &o.i1), (2, &o.i2), (3, &o.i3), (4, &o.i4), (5, &o.i5)] {
+        if !val.is_empty() {
+            args.push(format!("i{n}"));
+            args.push(val.clone());
+        }
+    }
+
+    let status = Command::new("awg")
+        .args(&args)
+        .status()
+        .context("Failed to spawn awg set for obfuscation reconcile")?;
+    if !status.success() {
+        return Err(anyhow!("awg set (obfuscation reconcile) failed"));
+    }
+    Ok(())
 }
 
 /// Add a peer to a WireGuard/AmneziaWG interface (`tool` is "wg" or "awg").
