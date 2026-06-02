@@ -59,6 +59,26 @@ export const commands = {
 	getSafeAreaInsets: () => typedError<SafeAreaInsets, string>(__TAURI_INVOKE("get_safe_area_insets")),
 	// Set status bar icon style to match app theme (Android only)
 	setStatusBarStyle: (isDark: boolean) => typedError<null, string>(__TAURI_INVOKE("set_status_bar_style", { isDark })),
+	// Get the log directory path
+	getLogDir: () => typedError<string, string>(__TAURI_INVOKE("get_log_dir")),
+	// Get current diagnostic capture status.
+	getLogCaptureStatus: () => __TAURI_INVOKE<LogCaptureStatus>("get_log_capture_status"),
+	/**
+	 *  Start a diagnostic capture. This enables verbose runtime logs and starts
+	 *  writing capture files without changing the user's saved profile permanently.
+	 */
+	startLogCapture: () => typedError<LogCaptureStatus, string>(__TAURI_INVOKE("start_log_capture")),
+	// Stop the active diagnostic capture and restore the previous runtime profile.
+	stopLogCapture: () => typedError<LogCaptureStatus, string>(__TAURI_INVOKE("stop_log_capture")),
+	/**
+	 *  Export latest diagnostic capture as a tar.gz archive via native save dialog.
+	 *  Returns `true` if saved successfully, `false` if the user cancelled.
+	 */
+	exportLogs: () => typedError<boolean, string>(__TAURI_INVOKE("export_logs")),
+	// Get the current log configuration.
+	getLogConfig: () => __TAURI_INVOKE<LogConfig>("get_log_config"),
+	// Apply a new log configuration. Persists to disk and propagates to VPN process.
+	setLogConfig: (config: LogConfig) => typedError<null, string>(__TAURI_INVOKE("set_log_config", { config })),
 };
 
 /* Types */// Information about an installed app (for split tunneling UI)
@@ -92,6 +112,23 @@ export type ConnectionInfo = {
 
 // Connection status enum
 export type ConnectionStatus = "disconnected" | "connecting" | "verifying_connection" | "connected" | "disconnecting";
+
+export type LogCaptureStatus = {
+	active: boolean,
+	capture_id: string | null,
+};
+
+// Persistent runtime logging configuration.
+export type LogConfig = {
+	// Active profile for runtime logs (logcat/stdout and capture files).
+	profile: LogProfile,
+	// Optional raw RUST_LOG-style filter string, stored separately from activation.
+	custom_filter: string | null,
+	// When true, `custom_filter` replaces the selected profile.
+	custom_filter_enabled: boolean,
+};
+
+export type LogProfile = "normal" | "verbose";
 
 // Safe area insets (status bar, nav bar) in dp
 export type SafeAreaInsets = {

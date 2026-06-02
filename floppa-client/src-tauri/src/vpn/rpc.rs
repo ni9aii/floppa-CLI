@@ -24,4 +24,13 @@ pub trait VpnRpc {
     /// Ping the VLESS server through the proxy chain.
     /// Updates last_packet_received on success.
     async fn ping() -> Result<(), String>;
+
+    /// Apply a new log configuration in the VPN process.
+    async fn set_log_config(config: crate::logging::LogConfig);
+
+    /// Start writing VPN process logs into a diagnostic capture.
+    async fn start_log_capture(capture_id: String);
+
+    /// Stop writing VPN process logs into a diagnostic capture.
+    async fn stop_log_capture();
 }

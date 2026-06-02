@@ -5,13 +5,128 @@ import { useVpnStore } from '../stores/vpnStore'
 import { useSettingsStore, type SplitMode } from '../stores/settingsStore'
 import { useUpdateStore } from '../stores/updateStore'
 import { useAndroidPermissions } from '../composables/useAndroidPermissions'
+import { commands } from '../bindings'
 
 const { t } = useI18n()
+const toast = useToast()
 const vpn = useVpnStore()
 const settings = useSettingsStore()
 const updateStore = useUpdateStore()
 const permissions = useAndroidPermissions()
 const appVersion = __APP_VERSION__
+
+const exportingLogs = ref(false)
+const captureBusy = ref(false)
+const showAdvancedLog = ref(false)
+const customFilterInput = ref('')
+const savingLogConfig = ref(false)
+
+// Log config type matching Rust LogConfig
+type LogProfile = 'normal' | 'verbose'
+interface LogConfig {
+  profile: LogProfile
+  custom_filter: string | null
+  custom_filter_enabled: boolean
+}
+
+interface LogCaptureStatus {
+  active: boolean
+  capture_id: string | null
+}
+
+const logConfig = ref<LogConfig>({
+  profile: 'normal',
+  custom_filter: null,
+  custom_filter_enabled: false,
+})
+
+const captureStatus = ref<LogCaptureStatus>({ active: false, capture_id: null })
+
+const profileOptions = [
+  { label: 'Normal', value: 'normal' as LogProfile },
+  { label: 'Verbose', value: 'verbose' as LogProfile },
+]
+
+async function loadLogConfig() {
+  logConfig.value = await commands.getLogConfig()
+  customFilterInput.value = logConfig.value.custom_filter ?? ''
+}
+
+async function loadCaptureStatus() {
+  captureStatus.value = await commands.getLogCaptureStatus()
+}
+
+async function updateLogProfile(profile: LogProfile) {
+  logConfig.value.profile = profile
+  await saveLogConfig()
+}
+
+async function applyCustomFilter() {
+  logConfig.value.custom_filter = customFilterInput.value || null
+  logConfig.value.custom_filter_enabled = Boolean(logConfig.value.custom_filter)
+  await saveLogConfig()
+}
+
+async function setCustomFilterEnabled(enabled: boolean) {
+  logConfig.value.custom_filter_enabled = enabled
+  await saveLogConfig()
+}
+
+async function clearCustomFilter() {
+  customFilterInput.value = ''
+  logConfig.value.custom_filter = null
+  logConfig.value.custom_filter_enabled = false
+  await saveLogConfig()
+}
+
+async function saveLogConfig() {
+  savingLogConfig.value = true
+  try {
+    const result = await commands.setLogConfig(logConfig.value)
+    if (result.status === 'error') {
+      console.error('Failed to save log config:', result.error)
+      toast.add({ title: t('settings.logConfigSaveFailed'), color: 'error' })
+    }
+  } finally {
+    savingLogConfig.value = false
+  }
+}
+
+async function toggleCapture() {
+  captureBusy.value = true
+  try {
+    const result = captureStatus.value.active
+      ? await commands.stopLogCapture()
+      : await commands.startLogCapture()
+    if (result.status === 'error') {
+      toast.add({ title: result.error, color: 'error' })
+      return
+    }
+    captureStatus.value = result.data
+    await loadLogConfig()
+  } finally {
+    captureBusy.value = false
+  }
+}
+
+async function shareLogs() {
+  exportingLogs.value = true
+  try {
+    const result = await commands.exportLogs()
+    if (result.status === 'error') {
+      toast.add({ title: t('settings.logsExportFailed'), color: 'error' })
+      return
+    }
+    if (result.data) {
+      toast.add({ title: t('settings.logsExported'), color: 'success' })
+    }
+  } catch (e) {
+    console.error('Failed to export logs:', e)
+    toast.add({ title: t('settings.logsExportFailed'), color: 'error' })
+  } finally {
+    exportingLogs.value = false
+  }
+}
 
 const searchQuery = ref('')
 const showSystemApps = ref(false)
@@ -37,13 +152,16 @@ const modeOptions = computed(() => [
   },
 ])
 
-onMounted(() => {
+onMounted(async () => {
   if (vpn.isAndroid) {
     permissions.checkBatteryOptimization()
     permissions.checkNotifications()
     // App list is preloaded at startup (VpnCard); this is a fallback
     settings.loadApps()
   }
+
+  await loadLogConfig()
+  await loadCaptureStatus()
 })
 
 const filteredApps = computed(() => {
@@ -367,6 +485,139 @@ function selectMode(mode: SplitMode) {
           size="sm"
           @click="updateStore.openChangelogForCurrent()"
         />
+      </div>
+    </UCard>
+
+    <!-- Diagnostics -->
+    <UCard class="mt-4">
+      <template #header>
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide-stethoscope" class="size-5" />
+          <span class="font-semibold">{{ t('settings.diagnostics') }}</span>
+        </div>
+      </template>
+
+      <p class="text-sm text-[var(--ui-text-muted)] mb-4">
+        {{ t('settings.diagnosticsDescription') }}
+      </p>
+
+      <div class="flex flex-col gap-4">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium">{{ t('settings.logProfile') }}</p>
+            <p class="text-xs text-[var(--ui-text-muted)]">
+              {{ t('settings.logProfileDescription') }}
+            </p>
+          </div>
+          <USelect
+            :model-value="logConfig.profile"
+            :items="profileOptions"
+            value-key="value"
+            class="w-32 shrink-0"
+            size="sm"
+            :disabled="savingLogConfig || captureStatus.active"
+            @update:model-value="(v: string) => updateLogProfile(v as LogProfile)"
+          />
+        </div>
+
+        <UDivider class="my-1" />
+
+        <button
+          class="flex items-center gap-2 text-sm text-[var(--ui-text-muted)] cursor-pointer"
+          @click="showAdvancedLog = !showAdvancedLog"
+        >
+          <UIcon
+            :name="showAdvancedLog ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+            class="size-4"
+          />
+          {{ t('settings.advancedLogFilter') }}
+        </button>
+
+        <div v-if="showAdvancedLog" class="flex flex-col gap-3">
+          <p class="text-xs text-[var(--ui-text-muted)]">
+            {{ t('settings.advancedLogFilterDescription') }}
+          </p>
+          <USwitch
+            :model-value="logConfig.custom_filter_enabled"
+            :label="t('settings.customFilterEnabled')"
+            :disabled="!logConfig.custom_filter || savingLogConfig || captureStatus.active"
+            @update:model-value="(v: boolean) => setCustomFilterEnabled(v)"
+          />
+          <div class="flex gap-2">
+            <UInput
+              v-model="customFilterInput"
+              :placeholder="t('settings.customFilterPlaceholder')"
+              class="flex-1"
+              size="sm"
+            />
+            <UButton
+              :label="t('settings.apply')"
+              size="sm"
+              :loading="savingLogConfig"
+              :disabled="captureStatus.active"
+              @click="applyCustomFilter"
+            />
+            <UButton
+              v-if="logConfig.custom_filter"
+              icon="i-lucide-x"
+              size="sm"
+              variant="ghost"
+              :disabled="captureStatus.active"
+              @click="clearCustomFilter"
+            />
+          </div>
+          <UAlert
+            v-if="logConfig.custom_filter_enabled"
+            color="info"
+            variant="soft"
+            :title="t('settings.customFilterActive')"
+            class="text-xs"
+          />
+        </div>
+
+        <UDivider class="my-1" />
+
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium">{{ t('settings.logCapture') }}</p>
+            <p class="text-xs text-[var(--ui-text-muted)]">
+              {{
+                captureStatus.active
+                  ? t('settings.logCaptureActive', { id: captureStatus.capture_id })
+                  : t('settings.logCaptureDescription')
+              }}
+            </p>
+          </div>
+          <UButton
+            :label="
+              captureStatus.active ? t('settings.stopLogCapture') : t('settings.startLogCapture')
+            "
+            :icon="captureStatus.active ? 'i-lucide-square' : 'i-lucide-circle-dot'"
+            :color="captureStatus.active ? 'error' : 'primary'"
+            variant="soft"
+            size="sm"
+            :loading="captureBusy"
+            @click="toggleCapture"
+          />
+        </div>
+
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium">{{ t('settings.exportLatestCapture') }}</p>
+            <p class="text-xs text-[var(--ui-text-muted)]">
+              {{ t('settings.exportLatestCaptureDescription') }}
+            </p>
+          </div>
+          <UButton
+            :label="t('settings.exportLogs')"
+            icon="i-lucide-share"
+            variant="soft"
+            size="sm"
+            :loading="exportingLogs"
+            :disabled="captureStatus.active || !captureStatus.capture_id"
+            @click="shareLogs"
+          />
+        </div>
       </div>
     </UCard>
   </div>
