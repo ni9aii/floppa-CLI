@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "sections": [
     {
       "type": "notes",
@@ -18,20 +18,20 @@
       "type": "added",
       "items": [
         {
-          "en": "VLESS+REALITY protocol — connect via VLESS as an alternative to WireGuard, on all platforms",
-          "ru": "Протокол VLESS+REALITY — подключение через VLESS как альтернатива WireGuard, на всех платформах"
+          "en": "AmneziaWG protocol — obfuscated WireGuard that resists DPI blocking, available alongside WireGuard and VLESS on all platforms",
+          "ru": "Протокол AmneziaWG — обфусцированный WireGuard, устойчивый к блокировкам по DPI, доступен наряду с WireGuard и VLESS на всех платформах"
         },
         {
-          "en": "VLESS connectivity check — verifies tunnel works through the actual proxy chain, not just the network",
-          "ru": "Проверка VLESS-соединения — проверяет работу туннеля через реальную прокси-цепочку, а не просто сеть"
+          "en": "Login + password sign-in — set a backup login so you can access your account even when Telegram is unavailable",
+          "ru": "Вход по логину и паролю — задайте резервный логин, чтобы заходить в аккаунт даже когда Telegram недоступен"
         },
         {
-          "en": "Changelog history — browse older changelogs with arrow navigation",
-          "ru": "История изменений — просмотр старых версий с навигацией стрелками"
+          "en": "Diagnostics — pick a runtime log profile, record a diagnostic capture, and export logs to help with troubleshooting",
+          "ru": "Диагностика — выбор профиля логирования, запись диагностического захвата и экспорт логов для помощи в решении проблем"
         },
         {
-          "en": "Arch Linux package (.pkg.tar.zst) now available in releases",
-          "ru": "Arch Linux пакет (.pkg.tar.zst) теперь доступен в релизах"
+          "en": "Profile avatars now load reliably — served from our own servers, so they show even where Telegram's image CDN is blocked",
+          "ru": "Аватарки профиля теперь загружаются стабильно — раздаются с наших серверов, поэтому видны даже там, где CDN картинок Telegram заблокирован"
         }
       ]
     },
@@ -39,12 +39,12 @@
       "type": "changed",
       "items": [
         {
-          "en": "\"Last activity\" renamed to \"Last transfer\" for clarity",
-          "ru": "«Последняя активность» переименовано в «Последний трафик» для ясности"
+          "en": "AmneziaWG is now the default protocol for new connections",
+          "ru": "AmneziaWG теперь протокол по умолчанию для новых подключений"
         },
         {
-          "en": "Smaller Android APK — optimized release build with LTO and stripping",
-          "ru": "Меньший размер Android APK — оптимизирована сборка релиза с LTO и стриппингом"
+          "en": "Login via Telegram now opens a landing page with a one-tap link, plus a paste-the-code fallback if the deep link doesn't open the app",
+          "ru": "Вход через Telegram теперь открывает страницу с ссылкой в одно нажатие и запасным вариантом со вставкой кода, если deep-link не открывает приложение"
         }
       ]
     },
@@ -52,25 +52,90 @@
       "type": "fixed",
       "items": [
         {
-          "en": "VLESS connection on Windows — fixed TUN device creation and platform configuration",
-          "ru": "VLESS-подключение на Windows — исправлено создание TUN-устройства и конфигурация платформы"
+          "en": "Windows — fixed connection failures caused by a stale Wintun network adapter left over from a previous session",
+          "ru": "Windows — исправлены сбои подключения из-за устаревшего сетевого адаптера Wintun, оставшегося от прошлой сессии"
         },
         {
-          "en": "VLESS connection on Linux desktop",
-          "ru": "VLESS-подключение на Linux десктопе"
-        },
-        {
-          "en": "VLESS connection verification now works correctly on Android (was bypassing the tunnel)",
-          "ru": "Проверка VLESS-подключения теперь работает корректно на Android (раньше обходила туннель)"
-        },
-        {
-          "en": "Total traffic on dashboard now includes traffic from removed WireGuard configs",
-          "ru": "Общий трафик на панели теперь учитывает трафик удалённых WireGuard-конфигов"
+          "en": "Dropdown menus no longer render behind dialogs and modals",
+          "ru": "Выпадающие меню больше не отображаются позади диалогов и модальных окон"
         }
       ]
     }
   ],
   "history": [
+    {
+      "version": "0.4.0",
+      "sections": [
+        {
+          "type": "notes",
+          "items": [
+            {
+              "en": "Follow project news, new features, and promotions in our Telegram channel: [t.me/floppa_vpn_channel](https://t.me/floppa_vpn_channel)",
+              "ru": "Следите за новостями проекта, новыми фичами и акциями в нашем Telegram-канале: [t.me/floppa_vpn_channel](https://t.me/floppa_vpn_channel)"
+            },
+            {
+              "en": "You can now buy a subscription via our Telegram bot: [t.me/FloppaVpnBot](https://t.me/FloppaVpnBot)",
+              "ru": "Теперь можно купить подписку через нашего Telegram-бота: [t.me/FloppaVpnBot](https://t.me/FloppaVpnBot)"
+            }
+          ]
+        },
+        {
+          "type": "added",
+          "items": [
+            {
+              "en": "VLESS+REALITY protocol — connect via VLESS as an alternative to WireGuard, on all platforms",
+              "ru": "Протокол VLESS+REALITY — подключение через VLESS как альтернатива WireGuard, на всех платформах"
+            },
+            {
+              "en": "VLESS connectivity check — verifies tunnel works through the actual proxy chain, not just the network",
+              "ru": "Проверка VLESS-соединения — проверяет работу туннеля через реальную прокси-цепочку, а не просто сеть"
+            },
+            {
+              "en": "Changelog history — browse older changelogs with arrow navigation",
+              "ru": "История изменений — просмотр старых версий с навигацией стрелками"
+            },
+            {
+              "en": "Arch Linux package (.pkg.tar.zst) now available in releases",
+              "ru": "Arch Linux пакет (.pkg.tar.zst) теперь доступен в релизах"
+            }
+          ]
+        },
+        {
+          "type": "changed",
+          "items": [
+            {
+              "en": "\"Last activity\" renamed to \"Last transfer\" for clarity",
+              "ru": "«Последняя активность» переименовано в «Последний трафик» для ясности"
+            },
+            {
+              "en": "Smaller Android APK — optimized release build with LTO and stripping",
+              "ru": "Меньший размер Android APK — оптимизирована сборка релиза с LTO и стриппингом"
+            }
+          ]
+        },
+        {
+          "type": "fixed",
+          "items": [
+            {
+              "en": "VLESS connection on Windows — fixed TUN device creation and platform configuration",
+              "ru": "VLESS-подключение на Windows — исправлено создание TUN-устройства и конфигурация платформы"
+            },
+            {
+              "en": "VLESS connection on Linux desktop",
+              "ru": "VLESS-подключение на Linux десктопе"
+            },
+            {
+              "en": "VLESS connection verification now works correctly on Android (was bypassing the tunnel)",
+              "ru": "Проверка VLESS-подключения теперь работает корректно на Android (раньше обходила туннель)"
+            },
+            {
+              "en": "Total traffic on dashboard now includes traffic from removed WireGuard configs",
+              "ru": "Общий трафик на панели теперь учитывает трафик удалённых WireGuard-конфигов"
+            }
+          ]
+        }
+      ]
+    },
     {
       "version": "0.3.3",
       "sections": [
