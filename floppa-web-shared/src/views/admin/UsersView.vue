@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation } from '@pinia/colada'
 import { listUsersQuery, listPlansQuery, createUserMutation } from '../../client/@pinia/colada.gen'
+import { getAvatarsBatch } from '../../client/sdk.gen'
 import type { UserSummary } from '../../client/types.gen'
 import type { TableColumn } from '@nuxt/ui'
 import { formatDate } from '../../utils'
@@ -32,6 +33,23 @@ function displayName(u: UserSummary): string {
   if (u.first_name) return u.last_name ? `${u.first_name} ${u.last_name}` : u.first_name
   return u.username || '-'
 }
+
+// Server-cached avatars as data URLs, keyed by user id (Telegram CDN is unreachable from clients).
+// Fetched in one batch when the user list loads.
+const avatars = ref<Record<string, string>>({})
+watch(
+  users,
+  async (list) => {
+    if (!list?.length) return
+    try {
+      const { data } = await getAvatarsBatch({ body: { user_ids: list.map((u) => u.id) } })
+      if (data) avatars.value = data
+    } catch {
+      // best-effort
+    }
+  },
+  { immediate: true },
+)
 
 const columns = computed<TableColumn<UserSummary>[]>(() => [
   { accessorKey: 'id', header: t('adminUsers.id') },
@@ -152,7 +170,7 @@ async function addUser() {
           <template #username-cell="{ row }">
             <div class="flex items-center gap-2">
               <UAvatar
-                :src="row.original.photo_url ?? undefined"
+                :src="avatars[String(row.original.id)] ?? undefined"
                 :alt="displayName(row.original)"
                 icon="i-lucide-user"
                 size="2xs"
@@ -222,7 +240,7 @@ async function addUser() {
           <div class="flex justify-between items-start">
             <div class="flex items-center gap-2">
               <UAvatar
-                :src="user.photo_url ?? undefined"
+                :src="avatars[String(user.id)] ?? undefined"
                 :alt="displayName(user)"
                 icon="i-lucide-user"
                 size="2xs"

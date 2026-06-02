@@ -1,5 +1,6 @@
 mod admin;
 mod auth;
+pub(crate) mod avatar;
 mod plans;
 mod user;
 
@@ -86,6 +87,7 @@ fn openapi_router() -> OpenApiRouter<AppState> {
     .routes(routes!(user::get_my_peer_config))
     .routes(routes!(user::send_my_peer_config))
     .routes(routes!(user::get_my_peer_by_device))
+    .routes(routes!(avatar::get_my_avatar))
     .routes(routes!(
         user::get_my_vless_config,
         user::regenerate_my_vless_config
@@ -102,6 +104,8 @@ fn openapi_router() -> OpenApiRouter<AppState> {
     .routes(routes!(admin::delete_admin_peer))
     .routes(routes!(admin::list_vless_peers))
     .routes(routes!(admin::regenerate_admin_vless_config))
+    .routes(routes!(avatar::get_user_avatar))
+    .routes(routes!(avatar::get_avatars_batch))
     .routes(routes!(admin::list_installations))
     .routes(routes!(admin::delete_installation))
     .routes(routes!(plans::list_plans, plans::create_plan))

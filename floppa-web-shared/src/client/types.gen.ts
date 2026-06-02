@@ -33,6 +33,10 @@ export type AuthUserInfo = {
     username?: string | null;
 };
 
+export type AvatarBatchRequest = {
+    user_ids: Array<number>;
+};
+
 export type CreatePeerRequest = {
     device_id?: string | null;
     device_name?: string | null;
@@ -388,6 +392,65 @@ export type VlessPeerSummary = {
     username?: string | null;
 };
 
+export type GetAvatarsBatchData = {
+    body: AvatarBatchRequest;
+    path?: never;
+    query?: never;
+    url: '/admin/avatars';
+};
+
+export type GetAvatarsBatchErrors = {
+    /**
+     * Not an admin
+     */
+    403: ApiError;
+};
+
+export type GetAvatarsBatchError = GetAvatarsBatchErrors[keyof GetAvatarsBatchErrors];
+
+export type GetAvatarsBatchResponses = {
+    /**
+     * Map of user id → data URL
+     */
+    200: {
+        [key: string]: string;
+    };
+};
+
+export type GetAvatarsBatchResponse = GetAvatarsBatchResponses[keyof GetAvatarsBatchResponses];
+
+export type GetUserAvatarData = {
+    body?: never;
+    path: {
+        /**
+         * User ID
+         */
+        id: number;
+    };
+    query?: never;
+    url: '/admin/users/{id}/avatar';
+};
+
+export type GetUserAvatarErrors = {
+    /**
+     * Not an admin
+     */
+    403: ApiError;
+    /**
+     * No avatar cached
+     */
+    404: ApiError;
+};
+
+export type GetUserAvatarError = GetUserAvatarErrors[keyof GetUserAvatarErrors];
+
+export type GetUserAvatarResponses = {
+    /**
+     * Avatar image bytes
+     */
+    200: unknown;
+};
+
 export type LoginAccountData = {
     body: AccountLoginRequest;
     path?: never;
@@ -669,6 +732,33 @@ export type GetMeResponses = {
 };
 
 export type GetMeResponse = GetMeResponses[keyof GetMeResponses];
+
+export type GetMyAvatarData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/me/avatar';
+};
+
+export type GetMyAvatarErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ApiError;
+    /**
+     * No avatar cached
+     */
+    404: ApiError;
+};
+
+export type GetMyAvatarError = GetMyAvatarErrors[keyof GetMyAvatarErrors];
+
+export type GetMyAvatarResponses = {
+    /**
+     * Avatar image bytes
+     */
+    200: unknown;
+};
 
 export type SetMyCredentialData = {
     body: SetCredentialRequest;

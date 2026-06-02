@@ -11,6 +11,7 @@ import {
   deleteAdminPeerMutation,
   setUserCredentialMutation,
 } from '../../client/@pinia/colada.gen'
+import { getUserAvatar } from '../../client/sdk.gen'
 import { formatBytes, formatDateTime, formatSpeedLimit, handleExternalLinkClick } from '../../utils'
 import StatusBadge from '../../components/StatusBadge.vue'
 import type { PeerSyncStatus } from '../../types'
@@ -48,6 +49,14 @@ const { t } = useI18n()
 const toast = useToast()
 
 const userId = Number(route.params.id)
+
+// Server-cached avatar (Telegram CDN is unreachable from clients); fetched as a blob → object URL.
+const avatarSrc = ref<string | undefined>(undefined)
+getUserAvatar({ path: { id: userId }, parseAs: 'blob' })
+  .then(({ data, response }) => {
+    if (response.ok && data instanceof Blob) avatarSrc.value = URL.createObjectURL(data)
+  })
+  .catch(() => {})
 
 const {
   data: user,
@@ -254,7 +263,7 @@ async function doRemovePeer() {
     <template v-else-if="user">
       <div class="flex items-center gap-4 mb-6">
         <UAvatar
-          :src="user.photo_url ?? undefined"
+          :src="avatarSrc"
           :alt="user.first_name ?? user.username ?? undefined"
           icon="i-lucide-user"
           size="xl"

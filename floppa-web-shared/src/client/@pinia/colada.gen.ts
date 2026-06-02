@@ -4,43 +4,16 @@ import { type _JSONValue, defineQueryOptions, type UseMutationOptions } from '@p
 
 import { serializeQueryKeyValue } from '../client';
 import { client } from '../client.gen';
-import { createMyPeer, createPlan, createUser, deleteAdminPeer, deleteInstallation, deleteMyPeer, deletePlan, deleteSubscription, exchangeTelegramLoginCode, getMe, getMyPeerByDevice, getMyPeerConfig, getMyPeers, getMyVlessConfig, getPublicConfig, getStats, getUser, getVersion, listInstallations, listPeers, listPlans, listUsers, listVlessPeers, loginAccount, type Options, pollTelegramLink, regenerateAdminVlessConfig, regenerateMyVlessConfig, registerAccount, removePeer, sendMyPeerConfig, setMyCredential, setSubscription, setUserCredential, startTelegramDeepLinkLogin, startTelegramLink, telegramDeepLinkCallback, telegramLogin, telegramMiniAppAuth, updatePlan, upsertMyInstallation } from '../sdk.gen';
-import type { CreateMyPeerData, CreateMyPeerError, CreateMyPeerResponse, CreatePlanData, CreatePlanError, CreatePlanResponse, CreateUserData, CreateUserError, CreateUserResponse2, DeleteAdminPeerData, DeleteAdminPeerError, DeleteInstallationData, DeleteInstallationError, DeleteMyPeerData, DeleteMyPeerError, DeletePlanData, DeletePlanError, DeletePlanResponse, DeleteSubscriptionData, DeleteSubscriptionError, ExchangeTelegramLoginCodeData, ExchangeTelegramLoginCodeError, ExchangeTelegramLoginCodeResponse, GetMeData, GetMeError, GetMeResponse, GetMyPeerByDeviceData, GetMyPeerByDeviceError, GetMyPeerByDeviceResponse, GetMyPeerConfigData, GetMyPeerConfigError, GetMyPeerConfigResponse, GetMyPeersData, GetMyPeersError, GetMyPeersResponse, GetMyVlessConfigData, GetMyVlessConfigError, GetMyVlessConfigResponse, GetPublicConfigData, GetPublicConfigResponse, GetStatsData, GetStatsError, GetStatsResponse, GetUserData, GetUserError, GetUserResponse, GetVersionData, GetVersionResponse, ListInstallationsData, ListInstallationsError, ListInstallationsResponse, ListPeersData, ListPeersError, ListPeersResponse, ListPlansData, ListPlansError, ListPlansResponse, ListUsersData, ListUsersError, ListUsersResponse, ListVlessPeersData, ListVlessPeersError, ListVlessPeersResponse, LoginAccountData, LoginAccountError, LoginAccountResponse, PollTelegramLinkData, PollTelegramLinkError, PollTelegramLinkResponse, RegenerateAdminVlessConfigData, RegenerateAdminVlessConfigError, RegenerateMyVlessConfigData, RegenerateMyVlessConfigError, RegenerateMyVlessConfigResponse, RegisterAccountData, RegisterAccountError, RegisterAccountResponse, RemovePeerData, RemovePeerError, SendMyPeerConfigData, SendMyPeerConfigError, SetMyCredentialData, SetMyCredentialError, SetMyCredentialResponse, SetSubscriptionData, SetSubscriptionError, SetUserCredentialData, SetUserCredentialError, SetUserCredentialResponse, StartTelegramDeepLinkLoginData, StartTelegramDeepLinkLoginError, StartTelegramLinkData, StartTelegramLinkError, StartTelegramLinkResponse, TelegramDeepLinkCallbackData, TelegramDeepLinkCallbackError, TelegramLoginData, TelegramLoginError, TelegramLoginResponse, TelegramMiniAppAuthData, TelegramMiniAppAuthError, TelegramMiniAppAuthResponse, UpdatePlanData, UpdatePlanError, UpdatePlanResponse, UpsertMyInstallationData, UpsertMyInstallationError, UpsertMyInstallationResponse } from '../types.gen';
+import { createMyPeer, createPlan, createUser, deleteAdminPeer, deleteInstallation, deleteMyPeer, deletePlan, deleteSubscription, exchangeTelegramLoginCode, getAvatarsBatch, getMe, getMyAvatar, getMyPeerByDevice, getMyPeerConfig, getMyPeers, getMyVlessConfig, getPublicConfig, getStats, getUser, getUserAvatar, getVersion, listInstallations, listPeers, listPlans, listUsers, listVlessPeers, loginAccount, type Options, pollTelegramLink, regenerateAdminVlessConfig, regenerateMyVlessConfig, registerAccount, removePeer, sendMyPeerConfig, setMyCredential, setSubscription, setUserCredential, startTelegramDeepLinkLogin, startTelegramLink, telegramDeepLinkCallback, telegramLogin, telegramMiniAppAuth, updatePlan, upsertMyInstallation } from '../sdk.gen';
+import type { CreateMyPeerData, CreateMyPeerError, CreateMyPeerResponse, CreatePlanData, CreatePlanError, CreatePlanResponse, CreateUserData, CreateUserError, CreateUserResponse2, DeleteAdminPeerData, DeleteAdminPeerError, DeleteInstallationData, DeleteInstallationError, DeleteMyPeerData, DeleteMyPeerError, DeletePlanData, DeletePlanError, DeletePlanResponse, DeleteSubscriptionData, DeleteSubscriptionError, ExchangeTelegramLoginCodeData, ExchangeTelegramLoginCodeError, ExchangeTelegramLoginCodeResponse, GetAvatarsBatchData, GetAvatarsBatchError, GetAvatarsBatchResponse, GetMeData, GetMeError, GetMeResponse, GetMyAvatarData, GetMyAvatarError, GetMyPeerByDeviceData, GetMyPeerByDeviceError, GetMyPeerByDeviceResponse, GetMyPeerConfigData, GetMyPeerConfigError, GetMyPeerConfigResponse, GetMyPeersData, GetMyPeersError, GetMyPeersResponse, GetMyVlessConfigData, GetMyVlessConfigError, GetMyVlessConfigResponse, GetPublicConfigData, GetPublicConfigResponse, GetStatsData, GetStatsError, GetStatsResponse, GetUserAvatarData, GetUserAvatarError, GetUserData, GetUserError, GetUserResponse, GetVersionData, GetVersionResponse, ListInstallationsData, ListInstallationsError, ListInstallationsResponse, ListPeersData, ListPeersError, ListPeersResponse, ListPlansData, ListPlansError, ListPlansResponse, ListUsersData, ListUsersError, ListUsersResponse, ListVlessPeersData, ListVlessPeersError, ListVlessPeersResponse, LoginAccountData, LoginAccountError, LoginAccountResponse, PollTelegramLinkData, PollTelegramLinkError, PollTelegramLinkResponse, RegenerateAdminVlessConfigData, RegenerateAdminVlessConfigError, RegenerateMyVlessConfigData, RegenerateMyVlessConfigError, RegenerateMyVlessConfigResponse, RegisterAccountData, RegisterAccountError, RegisterAccountResponse, RemovePeerData, RemovePeerError, SendMyPeerConfigData, SendMyPeerConfigError, SetMyCredentialData, SetMyCredentialError, SetMyCredentialResponse, SetSubscriptionData, SetSubscriptionError, SetUserCredentialData, SetUserCredentialError, SetUserCredentialResponse, StartTelegramDeepLinkLoginData, StartTelegramDeepLinkLoginError, StartTelegramLinkData, StartTelegramLinkError, StartTelegramLinkResponse, TelegramDeepLinkCallbackData, TelegramDeepLinkCallbackError, TelegramLoginData, TelegramLoginError, TelegramLoginResponse, TelegramMiniAppAuthData, TelegramMiniAppAuthError, TelegramMiniAppAuthResponse, UpdatePlanData, UpdatePlanError, UpdatePlanResponse, UpsertMyInstallationData, UpsertMyInstallationError, UpsertMyInstallationResponse } from '../types.gen';
 
 /**
- * Log in with a login + password.
+ * Batch-fetch cached avatars as data URLs (admin). Returns only users that have a cached avatar,
+ * keyed by user id (string). Avoids one request per row in the admin user list.
  */
-export const loginAccountMutation = (options?: Partial<Options<LoginAccountData>>): UseMutationOptions<LoginAccountResponse, Options<LoginAccountData>, LoginAccountError> => ({
+export const getAvatarsBatchMutation = (options?: Partial<Options<GetAvatarsBatchData>>): UseMutationOptions<GetAvatarsBatchResponse, Options<GetAvatarsBatchData>, GetAvatarsBatchError> => ({
     mutation: async (vars) => {
-        const { data } = await loginAccount({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-/**
- * Register a new account with a login + password (no Telegram). Grants a short taster trial.
- */
-export const registerAccountMutation = (options?: Partial<Options<RegisterAccountData>>): UseMutationOptions<RegisterAccountResponse, Options<RegisterAccountData>, RegisterAccountError> => ({
-    mutation: async (vars) => {
-        const { data } = await registerAccount({
-            ...options,
-            ...vars,
-            throwOnError: true
-        });
-        return data;
-    }
-});
-
-/**
- * Authenticate via Telegram Login Widget
- */
-export const telegramLoginMutation = (options?: Partial<Options<TelegramLoginData>>): UseMutationOptions<TelegramLoginResponse, Options<TelegramLoginData>, TelegramLoginError> => ({
-    mutation: async (vars) => {
-        const { data } = await telegramLogin({
+        const { data } = await getAvatarsBatch({
             ...options,
             ...vars,
             throwOnError: true
@@ -83,6 +56,65 @@ const createQueryKey = <TOptions extends Options>(id: string, options?: TOptions
     }
     return [params];
 };
+
+export const getUserAvatarQueryKey = (options: Options<GetUserAvatarData>) => createQueryKey('getUserAvatar', options);
+
+/**
+ * Get a user's cached avatar (admin).
+ */
+export const getUserAvatarQuery = defineQueryOptions<Options<GetUserAvatarData>, unknown, GetUserAvatarError>((options: Options<GetUserAvatarData>) => ({
+    key: getUserAvatarQueryKey(options),
+    query: async (context) => {
+        const { data } = await getUserAvatar({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+/**
+ * Log in with a login + password.
+ */
+export const loginAccountMutation = (options?: Partial<Options<LoginAccountData>>): UseMutationOptions<LoginAccountResponse, Options<LoginAccountData>, LoginAccountError> => ({
+    mutation: async (vars) => {
+        const { data } = await loginAccount({
+            ...options,
+            ...vars,
+            throwOnError: true
+        });
+        return data;
+    }
+});
+
+/**
+ * Register a new account with a login + password (no Telegram). Grants a short taster trial.
+ */
+export const registerAccountMutation = (options?: Partial<Options<RegisterAccountData>>): UseMutationOptions<RegisterAccountResponse, Options<RegisterAccountData>, RegisterAccountError> => ({
+    mutation: async (vars) => {
+        const { data } = await registerAccount({
+            ...options,
+            ...vars,
+            throwOnError: true
+        });
+        return data;
+    }
+});
+
+/**
+ * Authenticate via Telegram Login Widget
+ */
+export const telegramLoginMutation = (options?: Partial<Options<TelegramLoginData>>): UseMutationOptions<TelegramLoginResponse, Options<TelegramLoginData>, TelegramLoginError> => ({
+    mutation: async (vars) => {
+        const { data } = await telegramLogin({
+            ...options,
+            ...vars,
+            throwOnError: true
+        });
+        return data;
+    }
+});
 
 export const telegramDeepLinkCallbackQueryKey = (options?: Options<TelegramDeepLinkCallbackData>) => createQueryKey('telegramDeepLinkCallback', options);
 
@@ -205,6 +237,23 @@ export const getMeQuery = defineQueryOptions<Options<GetMeData>, GetMeResponse, 
     key: getMeQueryKey(options),
     query: async (context) => {
         const { data } = await getMe({
+            ...options,
+            ...context,
+            throwOnError: true
+        });
+        return data;
+    }
+}));
+
+export const getMyAvatarQueryKey = (options?: Options<GetMyAvatarData>) => createQueryKey('getMyAvatar', options);
+
+/**
+ * Get the current user's cached avatar.
+ */
+export const getMyAvatarQuery = defineQueryOptions<Options<GetMyAvatarData>, unknown, GetMyAvatarError>((options?: Options<GetMyAvatarData>) => ({
+    key: getMyAvatarQueryKey(options),
+    query: async (context) => {
+        const { data } = await getMyAvatar({
             ...options,
             ...context,
             throwOnError: true

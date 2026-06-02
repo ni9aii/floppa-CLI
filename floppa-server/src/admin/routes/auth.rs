@@ -151,6 +151,10 @@ async fn upsert_and_create_jwt(
             .await
             .map_err(|e| ApiError::internal(format!("Failed to upsert user: {e}")))?;
 
+    // Cache the user's Telegram avatar server-side (async, best-effort) — Telegram's CDN is
+    // unreachable from clients in Russia, so we serve avatars from our own origin.
+    super::avatar::spawn_refresh_if_stale(state, result.id, telegram_id, result.photo_url.clone());
+
     build_auth_response(state, result)
 }
 
