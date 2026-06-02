@@ -1,6 +1,7 @@
 //! Shared business logic used by both bot and admin.
 
 use crate::error::{FloppaError, Result};
+use crate::models::Protocol;
 use crate::{Config, DbPool, encrypt_private_key};
 use chrono::{Duration, Utc};
 use ipnetwork::Ipv4Network;
@@ -495,11 +496,16 @@ pub struct CreatePeerContext<'a> {
     pub config: &'a Config,
     pub encryption_key: &'a [u8; 32],
     pub wg_public_key: &'a str,
+    /// AmneziaWG server public key — required only when creating AmneziaWG peers.
+    pub awg_public_key: Option<&'a str>,
 }
 
 /// Client-provided options when creating a peer.
+#[derive(Default)]
 pub struct CreatePeerOptions {
     pub installation_id: Option<i64>,
+    /// Tunnel protocol. Defaults to AmneziaWG (the client default).
+    pub protocol: Protocol,
 }
 
 /// Result of peer creation.
@@ -523,6 +529,23 @@ pub async fn create_peer(
     options: Option<CreatePeerOptions>,
 ) -> Result<CreatePeerResult> {
     let installation_id = options.as_ref().and_then(|o| o.installation_id);
+    // No options → WireGuard (preserves the original single-protocol call sites).
+    let protocol = options
+        .as_ref()
+        .map(|o| o.protocol)
+        .unwrap_or(Protocol::WireGuard);
+
+    // Resolve the subnet for this protocol up front (also validates AmneziaWG is configured).
+    let subnet = match protocol {
+        Protocol::WireGuard => ctx.config.wireguard.client_subnet.clone(),
+        Protocol::AmneziaWg => ctx
+            .config
+            .amneziawg
+            .as_ref()
+            .ok_or(FloppaError::AmneziaWgNotConfigured)?
+            .client_subnet
+            .clone(),
+    };
 
     // Transaction: check limit + allocate resources + insert peer atomically
     let mut tx = ctx.pool.begin().await?;
@@ -530,7 +553,7 @@ pub async fn create_peer(
     // Lock the subscription row to serialize concurrent peer creations for this user
     let sub_info = sqlx::query!(
         r#"
-        SELECT p.max_peers, (SELECT COUNT(*) FROM peers WHERE user_id = $1 AND sync_status != 'removed')::int AS current_peers
+        SELECT p.max_peers
         FROM subscriptions s
         JOIN plans p ON s.plan_id = p.id
         WHERE s.user_id = $1 AND (s.expires_at IS NULL OR s.expires_at > NOW())
@@ -544,11 +567,46 @@ pub async fn create_peer(
     .await?;
 
     let sub = sub_info.ok_or(FloppaError::NoActiveSubscription)?;
-    let (max_peers, current_peers) = (sub.max_peers, sub.current_peers.unwrap_or(0));
+    let max_peers = sub.max_peers;
 
-    if current_peers >= max_peers {
+    // Slots are counted per-device: a client device (installation) is ONE slot no matter how many
+    // protocol peers it holds (WireGuard + AmneziaWG share a slot), while each standalone exported
+    // config (no installation) is its own slot.
+    let slots_used = sqlx::query_scalar!(
+        r#"
+        SELECT (
+            (SELECT COUNT(DISTINCT installation_id) FROM peers
+             WHERE user_id = $1 AND sync_status != 'removed' AND installation_id IS NOT NULL)
+          + (SELECT COUNT(*) FROM peers
+             WHERE user_id = $1 AND sync_status != 'removed' AND installation_id IS NULL)
+        )::int
+        "#,
+        user_id,
+    )
+    .fetch_one(&mut *tx)
+    .await?
+    .unwrap_or(0);
+
+    // Adding another protocol to a device that already has a peer is free (same slot). A standalone
+    // config (no installation) always consumes a new slot.
+    let consumes_new_slot = match installation_id {
+        Some(id) => {
+            let device_has_peer = sqlx::query_scalar!(
+                r#"SELECT EXISTS(SELECT 1 FROM peers WHERE user_id = $1 AND installation_id = $2 AND sync_status != 'removed')"#,
+                user_id,
+                id,
+            )
+            .fetch_one(&mut *tx)
+            .await?
+            .unwrap_or(false);
+            !device_has_peer
+        }
+        None => true,
+    };
+
+    if consumes_new_slot && slots_used >= max_peers {
         return Err(FloppaError::PeerLimitReached {
-            current: current_peers,
+            current: slots_used,
             max: max_peers,
         });
     }
@@ -559,12 +617,12 @@ pub async fn create_peer(
     let encrypted_private_key = encrypt_private_key(private_key.as_base64(), ctx.encryption_key)
         .map_err(|e| FloppaError::Encryption(e.to_string()))?;
 
-    let assigned_ip = allocate_ip_tx(&mut tx, &ctx.config.wireguard.client_subnet).await?;
+    let assigned_ip = allocate_ip_tx(&mut tx, &subnet).await?;
 
     let peer_id = sqlx::query_scalar!(
         r#"
-        INSERT INTO peers (user_id, public_key, private_key_encrypted, assigned_ip, sync_status, installation_id)
-        VALUES ($1, $2, $3, $4, 'pending_add', $5)
+        INSERT INTO peers (user_id, public_key, private_key_encrypted, assigned_ip, sync_status, installation_id, protocol)
+        VALUES ($1, $2, $3, $4, 'pending_add', $5, $6)
         RETURNING id
         "#,
         user_id,
@@ -572,24 +630,38 @@ pub async fn create_peer(
         &encrypted_private_key,
         &assigned_ip,
         installation_id,
+        protocol.as_db_str(),
     )
     .fetch_one(&mut *tx)
     .await?;
 
     tx.commit().await?;
 
-    let wg_config = generate_wg_config(
-        private_key.as_base64(),
-        &assigned_ip,
-        ctx.config,
-        ctx.wg_public_key,
-    );
+    let config = match protocol {
+        Protocol::WireGuard => generate_wg_config(
+            private_key.as_base64(),
+            &assigned_ip,
+            ctx.config,
+            ctx.wg_public_key,
+        ),
+        Protocol::AmneziaWg => {
+            let awg = ctx
+                .config
+                .amneziawg
+                .as_ref()
+                .ok_or(FloppaError::AmneziaWgNotConfigured)?;
+            let awg_pub = ctx
+                .awg_public_key
+                .ok_or(FloppaError::AmneziaWgNotConfigured)?;
+            generate_awg_config(private_key.as_base64(), &assigned_ip, awg, awg_pub)
+        }
+    };
 
     Ok(CreatePeerResult {
         id: peer_id,
         assigned_ip,
         private_key_plaintext: private_key.as_base64().to_string(),
-        config: wg_config,
+        config,
     })
 }
 
@@ -636,20 +708,25 @@ where
     Err(FloppaError::NoAvailableIps)
 }
 
-/// Find an active peer by device_id for a given user (via app_installations JOIN).
+/// Find an active peer by device_id + protocol for a given user (via app_installations JOIN).
+///
+/// A device may hold one active peer per protocol, so the protocol is part of the lookup.
 pub async fn find_peer_by_device_id(
     pool: &DbPool,
     user_id: i64,
     device_id: &str,
+    protocol: Protocol,
 ) -> Result<Option<i64>> {
     let peer_id = sqlx::query_scalar!(
         r#"
         SELECT p.id FROM peers p
         JOIN app_installations ai ON p.installation_id = ai.id
-        WHERE p.user_id = $1 AND ai.device_id = $2 AND p.sync_status NOT IN ('removed', 'pending_remove')
+        WHERE p.user_id = $1 AND ai.device_id = $2 AND p.protocol = $3
+          AND p.sync_status NOT IN ('removed', 'pending_remove')
         "#,
         user_id,
         device_id,
+        protocol.as_db_str(),
     )
     .fetch_optional(pool)
     .await?;
@@ -719,6 +796,51 @@ PersistentKeepalive = 25
     )
 }
 
+/// Generate an AmneziaWG client configuration string.
+///
+/// This is a standard AmneziaWG `.conf`: a WireGuard config plus the interface-wide
+/// obfuscation params in `[Interface]`. The params are echoed verbatim from the server
+/// config so both ends agree. The same text is parsed by the Tauri client (→ gotatun
+/// `AwgConfig`) and importable into the official Amnezia client.
+pub fn generate_awg_config(
+    private_key: &str,
+    assigned_ip: &str,
+    awg: &crate::config::AmneziaWgConfig,
+    awg_public_key: &str,
+) -> String {
+    let dns = awg.dns.join(", ");
+    let o = &awg.obfuscation;
+
+    let mut interface = format!(
+        "[Interface]\nPrivateKey = {private_key}\nAddress = {assigned_ip}/32\nDNS = {dns}\nMTU = {mtu}\n",
+        mtu = awg.mtu,
+    );
+    // Obfuscation params (AmneziaWG 2.0). H/S must match both ends; Jc/I are initiator-side.
+    interface.push_str(&format!(
+        "Jc = {}\nJmin = {}\nJmax = {}\n",
+        o.jc, o.jmin, o.jmax
+    ));
+    interface.push_str(&format!(
+        "S1 = {}\nS2 = {}\nS3 = {}\nS4 = {}\n",
+        o.s1, o.s2, o.s3, o.s4
+    ));
+    interface.push_str(&format!(
+        "H1 = {}\nH2 = {}\nH3 = {}\nH4 = {}\n",
+        o.h1, o.h2, o.h3, o.h4
+    ));
+    for (n, val) in [(1, &o.i1), (2, &o.i2), (3, &o.i3), (4, &o.i4), (5, &o.i5)] {
+        if !val.is_empty() {
+            interface.push_str(&format!("I{n} = {val}\n"));
+        }
+    }
+
+    format!(
+        "{interface}\n[Peer]\nPublicKey = {awg_public_key}\nEndpoint = {endpoint}\nAllowedIPs = {allowed_ips}\nPersistentKeepalive = 25\n",
+        endpoint = awg.endpoint,
+        allowed_ips = awg.allowed_ips,
+    )
+}
+
 /// Generate a VLESS+REALITY URI for a client.
 ///
 /// `reality_public_key` comes from `Secrets.vless.reality_public_key`.
@@ -751,6 +873,7 @@ mod tests {
                 allowed_ips: "0.0.0.0/0, ::/0".into(),
                 rate_limit: None,
             },
+            amneziawg: None,
             vless: None,
             bot: None,
             auth: None,
@@ -802,6 +925,38 @@ mod tests {
         assert!(result.contains("Endpoint = vpn.test.com:51820"));
         assert!(result.contains("AllowedIPs = 0.0.0.0/0, ::/0"));
         assert!(result.contains("PersistentKeepalive = 25"));
+    }
+
+    #[test]
+    fn test_generate_awg_config() {
+        use crate::config::{AmneziaWgConfig, AwgObfuscation};
+        let awg = AmneziaWgConfig {
+            interface: "awg-test".into(),
+            endpoint: "vpn.test.com:51821".into(),
+            listen_port: None,
+            client_subnet: "10.101.0.0/24".into(),
+            server_ip: None,
+            dns: vec!["1.1.1.1".into()],
+            allowed_ips: "0.0.0.0/0, ::/0".into(),
+            mtu: 1280,
+            rate_limit: None,
+            obfuscation: AwgObfuscation::default(),
+        };
+        let cfg = generate_awg_config("PRIV", "10.101.0.5", &awg, "AWGPUB");
+
+        assert!(cfg.contains("PrivateKey = PRIV"));
+        assert!(cfg.contains("Address = 10.101.0.5/32"));
+        assert!(cfg.contains("MTU = 1280"));
+        // AmneziaWG 2.0 obfuscation params present.
+        assert!(cfg.contains("Jc = 6"));
+        assert!(cfg.contains("S3 = 32")); // 2.0-only padding
+        assert!(cfg.contains("H1 = 234567-345678"));
+        assert!(cfg.contains("I1 = <b 0xc30000000108>"));
+        // Empty signature slots are omitted.
+        assert!(!cfg.contains("I2 ="));
+        assert!(cfg.contains("PublicKey = AWGPUB"));
+        assert!(cfg.contains("Endpoint = vpn.test.com:51821"));
+        assert!(cfg.contains("PersistentKeepalive = 25"));
     }
 
     #[test]
@@ -1318,6 +1473,7 @@ mod tests {
             config,
             encryption_key: &ENCRYPTION_KEY,
             wg_public_key: "dGVzdC1wdWJsaWMta2V5LWJhc2U2NC1lbmNvZGVkMTI=",
+            awg_public_key: None,
         }
     }
 
@@ -1383,6 +1539,78 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    async fn test_per_device_slot_allows_second_protocol(pool: DbPool) {
+        use crate::config::{AmneziaWgConfig, AwgObfuscation};
+        // AmneziaWG-enabled config so the AWG peer can be created.
+        let mut config = test_config();
+        config.amneziawg = Some(AmneziaWgConfig {
+            interface: "awg-test".into(),
+            endpoint: "vpn.test.com:51821".into(),
+            listen_port: None,
+            client_subnet: "10.101.0.0/24".into(),
+            server_ip: None,
+            dns: vec!["1.1.1.1".into()],
+            allowed_ips: "0.0.0.0/0, ::/0".into(),
+            mtu: 1280,
+            rate_limit: None,
+            obfuscation: AwgObfuscation::default(),
+        });
+        static KEY: [u8; 32] = [0x42u8; 32];
+        let ctx = CreatePeerContext {
+            pool: &pool,
+            config: &config,
+            encryption_key: &KEY,
+            wg_public_key: "dGVzdC1wdWJsaWMta2V5LWJhc2U2NC1lbmNvZGVkMTI=",
+            awg_public_key: Some("dGVzdC1wdWJsaWMta2V5LWJhc2U2NC1lbmNvZGVkMTI="),
+        };
+
+        // max_peers = 1 (one device slot).
+        let plan_id = sqlx::query_scalar!(
+            "INSERT INTO plans (name, display_name, max_peers) VALUES ('limited', 'Limited', 1) RETURNING id"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let user_id = seed_user(&pool, 22222).await;
+        seed_subscription(&pool, user_id, plan_id).await;
+
+        let inst = upsert_installation(&pool, user_id, "dev-1", None, None, None)
+            .await
+            .unwrap();
+
+        // WireGuard peer for the device → consumes the single slot.
+        create_peer(
+            &ctx,
+            user_id,
+            Some(CreatePeerOptions {
+                installation_id: Some(inst.id),
+                protocol: Protocol::WireGuard,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // AmneziaWG peer for the SAME device → allowed despite max_peers=1 (same slot).
+        create_peer(
+            &ctx,
+            user_id,
+            Some(CreatePeerOptions {
+                installation_id: Some(inst.id),
+                protocol: Protocol::AmneziaWg,
+            }),
+        )
+        .await
+        .unwrap();
+
+        // A standalone exported config (no installation) now exceeds the limit.
+        let result = create_peer(&ctx, user_id, None).await;
+        assert!(matches!(
+            result,
+            Err(FloppaError::PeerLimitReached { current: 1, max: 1 })
+        ));
+    }
+
+    #[sqlx::test(migrations = "../migrations")]
     async fn test_create_peer_with_installation(pool: DbPool) {
         let config = test_config();
         let ctx = test_ctx(&pool, &config);
@@ -1404,6 +1632,7 @@ mod tests {
 
         let options = Some(CreatePeerOptions {
             installation_id: Some(installation.id),
+            protocol: Protocol::WireGuard,
         });
 
         let result = create_peer(&ctx, user_id, options).await.unwrap();
@@ -1435,7 +1664,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = find_peer_by_device_id(&pool, user_id, "dev-123")
+        let result = find_peer_by_device_id(&pool, user_id, "dev-123", Protocol::AmneziaWg)
             .await
             .unwrap();
         assert_eq!(result, Some(peer_id));
@@ -1445,7 +1674,7 @@ mod tests {
     async fn test_find_peer_by_device_id_not_found(pool: DbPool) {
         let user_id = seed_user(&pool, 11111).await;
 
-        let result = find_peer_by_device_id(&pool, user_id, "nonexistent")
+        let result = find_peer_by_device_id(&pool, user_id, "nonexistent", Protocol::AmneziaWg)
             .await
             .unwrap();
         assert_eq!(result, None);
@@ -1468,7 +1697,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = find_peer_by_device_id(&pool, user_id, "dev-123")
+        let result = find_peer_by_device_id(&pool, user_id, "dev-123", Protocol::AmneziaWg)
             .await
             .unwrap();
         assert_eq!(result, None);

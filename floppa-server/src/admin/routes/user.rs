@@ -1,11 +1,11 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
 use chrono::Utc;
-use floppa_core::{decrypt_private_key, services};
+use floppa_core::{Protocol, decrypt_private_key, services};
 use serde::{Deserialize, Serialize};
 use teloxide::{prelude::*, types::InputFile};
 use utoipa::ToSchema;
@@ -13,6 +13,49 @@ use utoipa::ToSchema;
 use crate::admin::{auth::AuthUser, error::ApiError, vm_client};
 
 use super::AppState;
+
+/// Parse a protocol string from a request/query param. Defaults to WireGuard when absent
+/// (legacy clients), so AmneziaWG must be requested explicitly.
+fn parse_protocol(s: Option<&str>) -> Protocol {
+    match s {
+        Some("amneziawg") => Protocol::AmneziaWg,
+        _ => Protocol::WireGuard,
+    }
+}
+
+/// Render a client config for a peer, branching on its stored protocol.
+fn render_peer_config(
+    state: &AppState,
+    protocol: &str,
+    private_key: &str,
+    assigned_ip: &str,
+) -> Result<String, ApiError> {
+    match protocol {
+        "amneziawg" => {
+            let awg = state
+                .config
+                .amneziawg
+                .as_ref()
+                .ok_or(floppa_core::FloppaError::AmneziaWgNotConfigured)?;
+            let awg_pub = state
+                .awg_public_key
+                .as_deref()
+                .ok_or(floppa_core::FloppaError::AmneziaWgNotConfigured)?;
+            Ok(services::generate_awg_config(
+                private_key,
+                assigned_ip,
+                awg,
+                awg_pub,
+            ))
+        }
+        _ => Ok(services::generate_wg_config(
+            private_key,
+            assigned_ip,
+            &state.config,
+            &state.wg_public_key,
+        )),
+    }
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct MeResponse {
@@ -47,6 +90,8 @@ pub struct MyPeer {
     id: i64,
     assigned_ip: String,
     sync_status: String,
+    /// Tunnel protocol: "wireguard" or "amneziawg".
+    protocol: String,
     download_bytes: i64,
     upload_bytes: i64,
     last_handshake: Option<chrono::DateTime<Utc>>,
@@ -88,6 +133,9 @@ pub struct CreatePeerRequest {
     device_id: Option<String>,
     #[serde(default)]
     installation_id: Option<i64>,
+    /// Tunnel protocol: "wireguard" or "amneziawg". Defaults to "wireguard".
+    #[serde(default)]
+    protocol: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -352,7 +400,7 @@ pub(super) async fn get_my_peers(
 ) -> Result<Json<MyPeersResponse>, ApiError> {
     let rows = sqlx::query!(
         r#"
-        SELECT p.id, p.assigned_ip, p.sync_status, p.last_handshake, p.created_at,
+        SELECT p.id, p.assigned_ip, p.sync_status, p.protocol, p.last_handshake, p.created_at,
                ai.device_name, ai.device_id AS "device_id?"
         FROM peers p
         LEFT JOIN app_installations ai ON p.installation_id = ai.id
@@ -377,6 +425,7 @@ pub(super) async fn get_my_peers(
                 id: r.id,
                 assigned_ip: r.assigned_ip,
                 sync_status: r.sync_status,
+                protocol: r.protocol,
                 download_bytes: download,
                 upload_bytes: upload,
                 last_handshake: r.last_handshake,
@@ -458,7 +507,10 @@ pub(super) async fn create_my_peer(
         config: &state.config,
         encryption_key: &encryption_key,
         wg_public_key: &state.wg_public_key,
+        awg_public_key: state.awg_public_key.as_deref(),
     };
+
+    let protocol = parse_protocol(body.as_ref().and_then(|Json(req)| req.protocol.as_deref()));
 
     // Resolve installation_id: use explicit field, or auto-upsert from legacy device_id/device_name
     let installation_id = if let Some(Json(ref req)) = body {
@@ -482,8 +534,9 @@ pub(super) async fn create_my_peer(
         None
     };
 
-    let options = installation_id.map(|id| services::CreatePeerOptions {
-        installation_id: Some(id),
+    let options = Some(services::CreatePeerOptions {
+        installation_id,
+        protocol,
     });
 
     let result = services::create_peer(&ctx, auth.user_id, options).await?;
@@ -548,7 +601,7 @@ pub(super) async fn get_my_peer_config(
 ) -> Result<String, ApiError> {
     let peer = sqlx::query!(
         r#"
-        SELECT private_key_encrypted, assigned_ip
+        SELECT private_key_encrypted, assigned_ip, protocol
         FROM peers
         WHERE id = $1 AND user_id = $2 AND sync_status != 'removed'
         "#,
@@ -573,12 +626,7 @@ pub(super) async fn get_my_peer_config(
     let private_key = decrypt_private_key(encrypted, &encryption_key)
         .map_err(|e| ApiError::internal(format!("Decryption failed: {e}")))?;
 
-    Ok(services::generate_wg_config(
-        &private_key,
-        &peer.assigned_ip,
-        &state.config,
-        &state.wg_public_key,
-    ))
+    render_peer_config(&state, &peer.protocol, &private_key, &peer.assigned_ip)
 }
 
 /// Send WireGuard config to user via Telegram bot
@@ -602,7 +650,7 @@ pub(super) async fn send_my_peer_config(
 ) -> Result<StatusCode, ApiError> {
     let peer = sqlx::query!(
         r#"
-        SELECT private_key_encrypted, assigned_ip
+        SELECT private_key_encrypted, assigned_ip, protocol
         FROM peers
         WHERE id = $1 AND user_id = $2 AND sync_status != 'removed'
         "#,
@@ -627,12 +675,7 @@ pub(super) async fn send_my_peer_config(
     let private_key = decrypt_private_key(encrypted, &encryption_key)
         .map_err(|e| ApiError::internal(format!("Decryption failed: {e}")))?;
 
-    let wg_config = services::generate_wg_config(
-        &private_key,
-        &peer.assigned_ip,
-        &state.config,
-        &state.wg_public_key,
-    );
+    let wg_config = render_peer_config(&state, &peer.protocol, &private_key, &peer.assigned_ip)?;
     let filename = format!("floppa-vpn-{}.conf", peer.assigned_ip);
 
     // Get user's telegram_id (None for credential-only accounts — they download the config directly)
@@ -656,13 +699,23 @@ pub(super) async fn send_my_peer_config(
     Ok(StatusCode::OK)
 }
 
-/// Get a peer by device_id for the current user
+#[derive(Deserialize, ToSchema)]
+pub struct ByDeviceQuery {
+    /// Tunnel protocol: "wireguard" or "amneziawg". Defaults to "wireguard".
+    #[serde(default)]
+    protocol: Option<String>,
+}
+
+/// Get a peer by device_id (+ protocol) for the current user
 #[utoipa::path(
     get,
     path = "/me/peers/by-device/{device_id}",
     tag = "user",
     security(("bearer" = [])),
-    params(("device_id" = String, Path, description = "Device UUID")),
+    params(
+        ("device_id" = String, Path, description = "Device UUID"),
+        ("protocol" = Option<String>, Query, description = "Tunnel protocol (wireguard|amneziawg)"),
+    ),
     responses(
         (status = 200, body = MyPeer),
         (status = 401, body = ApiError, description = "Unauthorized"),
@@ -673,17 +726,21 @@ pub(super) async fn get_my_peer_by_device(
     auth: AuthUser,
     State(state): State<AppState>,
     Path(device_id): Path<String>,
+    Query(query): Query<ByDeviceQuery>,
 ) -> Result<Json<MyPeer>, ApiError> {
+    let protocol = parse_protocol(query.protocol.as_deref());
     let row = sqlx::query!(
         r#"
-        SELECT p.id, p.assigned_ip, p.sync_status, p.last_handshake, p.created_at,
+        SELECT p.id, p.assigned_ip, p.sync_status, p.protocol, p.last_handshake, p.created_at,
                ai.device_name, ai.device_id
         FROM peers p
         JOIN app_installations ai ON p.installation_id = ai.id
-        WHERE p.user_id = $1 AND ai.device_id = $2 AND p.sync_status NOT IN ('removed', 'pending_remove')
+        WHERE p.user_id = $1 AND ai.device_id = $2 AND p.protocol = $3
+          AND p.sync_status NOT IN ('removed', 'pending_remove')
         "#,
         auth.user_id,
-        &device_id
+        &device_id,
+        protocol.as_db_str(),
     )
     .fetch_optional(&state.pool)
     .await?
@@ -700,6 +757,7 @@ pub(super) async fn get_my_peer_by_device(
         id: row.id,
         assigned_ip: row.assigned_ip,
         sync_status: row.sync_status,
+        protocol: row.protocol,
         download_bytes: download,
         upload_bytes: upload,
         last_handshake: row.last_handshake,

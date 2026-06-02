@@ -78,6 +78,11 @@ impl From<FloppaError> for ApiError {
                 message: "VLESS is not configured on this server".into(),
                 status: StatusCode::BAD_REQUEST,
             },
+            FloppaError::AmneziaWgNotConfigured => Self {
+                error: "amneziawg_not_configured".into(),
+                message: "AmneziaWG is not configured on this server".into(),
+                status: StatusCode::BAD_REQUEST,
+            },
             FloppaError::CredentialTaken => Self {
                 error: "login_taken".into(),
                 message: "This login is already taken".into(),

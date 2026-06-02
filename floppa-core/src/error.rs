@@ -32,6 +32,9 @@ pub enum FloppaError {
     #[error("VLESS not configured on this server")]
     VlessNotConfigured,
 
+    #[error("AmneziaWG not configured on this server")]
+    AmneziaWgNotConfigured,
+
     #[error("Login already taken")]
     CredentialTaken,
 

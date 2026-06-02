@@ -27,12 +27,12 @@ enum Command {
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
-    /// Connect to VPN (auto-detects WireGuard .conf or VLESS URI)
+    /// Connect to VPN (auto-detects WireGuard/AmneziaWG .conf or VLESS URI)
     Connect {
         /// Config file (.conf) or VLESS URI file
         #[arg(long)]
         config: Option<String>,
-        /// Protocol: wireguard (default) or vless
+        /// Protocol: wireguard (default), amneziawg, or vless
         #[arg(long, default_value = "wireguard")]
         protocol: String,
         /// TUN interface name
@@ -49,12 +49,12 @@ enum Command {
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
-    /// Fetch and print config (WireGuard .conf or VLESS URI)
+    /// Fetch and print config (WireGuard/AmneziaWG .conf or VLESS URI)
     Config {
-        /// Protocol: wireguard (default) or vless
+        /// Protocol: wireguard (default), amneziawg, or vless
         #[arg(long, default_value = "wireguard")]
         protocol: String,
-        /// Peer ID (WireGuard only; uses first active peer if omitted)
+        /// Peer ID (WireGuard/AmneziaWG only; uses first active peer of that protocol if omitted)
         #[arg(long)]
         peer_id: Option<i64>,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
                     if protocol == "vless" {
                         client.get_vless_config().await?
                     } else {
-                        client.find_or_create_peer().await?
+                        client.find_or_create_peer(&protocol).await?
                     }
                 }
             };
@@ -177,7 +177,7 @@ async fn main() -> Result<()> {
             } else {
                 match peer_id {
                     Some(id) => client.get_peer_config(id).await?,
-                    None => client.find_or_create_peer().await?,
+                    None => client.find_or_create_peer(&protocol).await?,
                 }
             };
             print!("{config}");

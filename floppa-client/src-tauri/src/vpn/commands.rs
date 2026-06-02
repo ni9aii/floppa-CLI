@@ -2,8 +2,8 @@ use super::backend::VpnBackend;
 use super::config as vpn_config;
 use super::platform::{Platform, PlatformImpl};
 use super::state::{
-    ConnectionInfo, ConnectionStatus, ProtocolConfig, SavedVpnConfigs, VlessVpnConfig, VpnState,
-    WgConfig,
+    AwgConfig, ConnectionInfo, ConnectionStatus, ProtocolConfig, SavedVpnConfigs, VlessVpnConfig,
+    VpnState, WgConfig, config_str_is_amneziawg,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -84,6 +84,10 @@ pub async fn set_active_config(
         let vless = VlessVpnConfig::from_uri(trimmed)?;
         configs.vless = Some(vless);
         configs.active_protocol = "vless".to_string();
+    } else if config_str_is_amneziawg(&config_str) {
+        let awg = AwgConfig::from_config_str(&config_str)?;
+        configs.amneziawg = Some(awg);
+        configs.active_protocol = "amneziawg".to_string();
     } else {
         let wg = WgConfig::from_config_str(&config_str)?;
         configs.wireguard = Some(wg);
@@ -137,11 +141,13 @@ pub async fn get_config(state: State<'_, Arc<VpnState>>) -> Result<Option<Config
         address: c.address().to_string(),
         dns: match c {
             ProtocolConfig::WireGuard(wg) => wg.dns.clone(),
+            ProtocolConfig::AmneziaWg(awg) => awg.wg.dns.clone(),
             ProtocolConfig::Vless(vless) => vless.dns.clone(),
         },
         server_endpoint: c.endpoint_str().to_string(),
         allowed_ips: match c {
             ProtocolConfig::WireGuard(wg) => wg.allowed_ips.clone(),
+            ProtocolConfig::AmneziaWg(awg) => awg.wg.allowed_ips.clone(),
             ProtocolConfig::Vless(vless) => vless.allowed_ips.clone(),
         },
         mtu: Some(c.get_mtu()),
@@ -159,6 +165,9 @@ pub async fn set_active_protocol(
     match protocol.as_str() {
         "wireguard" if configs.wireguard.is_some() => {
             configs.active_protocol = "wireguard".to_string();
+        }
+        "amneziawg" if configs.amneziawg.is_some() => {
+            configs.active_protocol = "amneziawg".to_string();
         }
         "vless" if configs.vless.is_some() => {
             configs.active_protocol = "vless".to_string();
@@ -312,14 +321,16 @@ async fn connect_android(
         return Err("VPN permission denied".to_string());
     }
 
-    // Serialize config for the Android VPN service (WG config text or vless:// URI)
+    // Serialize config for the Android VPN service (WG/AWG config text or vless:// URI)
     let protocol_config_str = match &config {
         ProtocolConfig::WireGuard(wg) => wg.to_config_str(),
+        ProtocolConfig::AmneziaWg(awg) => awg.to_config_str(),
         ProtocolConfig::Vless(vless) => vless.uri.clone(),
     };
 
     let dns = match &config {
         ProtocolConfig::WireGuard(wg) => wg.dns.clone(),
+        ProtocolConfig::AmneziaWg(awg) => awg.wg.dns.clone(),
         ProtocolConfig::Vless(vless) => vless.dns.clone(),
     };
 
@@ -399,8 +410,8 @@ async fn connect_android(
 
     let phase_start = std::time::Instant::now();
     match &config {
-        ProtocolConfig::WireGuard(_) => {
-            info!("Tunnel up on Android, verifying WireGuard handshake...");
+        ProtocolConfig::WireGuard(_) | ProtocolConfig::AmneziaWg(_) => {
+            info!("Tunnel up on Android, verifying handshake...");
             if wait_for_handshake(backend, std::time::Duration::from_secs(5))
                 .await
                 .is_err()
@@ -567,8 +578,8 @@ async fn connect_desktop(
 
             let phase_start = std::time::Instant::now();
             match &config {
-                ProtocolConfig::WireGuard(_) => {
-                    info!("Tunnel up, verifying WireGuard handshake...");
+                ProtocolConfig::WireGuard(_) | ProtocolConfig::AmneziaWg(_) => {
+                    info!("Tunnel up, verifying handshake...");
                     if wait_for_handshake(backend, std::time::Duration::from_secs(5))
                         .await
                         .is_err()

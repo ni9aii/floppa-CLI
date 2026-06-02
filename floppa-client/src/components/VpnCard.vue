@@ -9,6 +9,7 @@ import {
   getMyPeerByDevice,
   getMyPeerConfig,
   getMyVlessConfig,
+  getPublicConfig,
   upsertMyInstallation,
 } from 'floppa-web-shared/client/sdk.gen'
 import { formatBytes, formatSpeed, formatDuration, ConnectionIndicator } from 'floppa-web-shared'
@@ -56,6 +57,51 @@ type SyncResult =
   | { outcome: 'error'; errorKey: string }
   | { outcome: 'offline' }
 
+/**
+ * Fetch (and optionally create) the wg-family peer for `protocol`, loading its config into the
+ * VPN store. `allowCreate=false` only loads a pre-existing peer (so the secondary protocol never
+ * consumes a peer slot). Returns an error outcome on subscription/limit failures during create.
+ */
+async function syncWgFamilyPeer(protocol: string, allowCreate: boolean): Promise<SyncResult> {
+  const { data: peer } = await getMyPeerByDevice({
+    path: { device_id: vpn.deviceId! },
+    query: { protocol },
+  })
+
+  if (peer) {
+    const { data: configStr } = await getMyPeerConfig({
+      path: { id: peer.id },
+      throwOnError: true,
+    })
+    await vpn.setActiveConfig(configStr)
+    return { outcome: 'ok' }
+  }
+
+  if (!allowCreate) return { outcome: 'ok' }
+
+  if (!me.value?.subscription) {
+    return { outcome: 'error', errorKey: 'vpn.noSubscription' }
+  }
+
+  try {
+    const response = await createPeerMut.mutateAsync({
+      body: {
+        device_id: vpn.deviceId,
+        device_name: vpn.deviceName,
+        protocol,
+      },
+    })
+    await vpn.setActiveConfig(response.config)
+    return { outcome: 'ok' }
+  } catch (e: unknown) {
+    const errorCode = (e as Record<string, unknown>)?.error
+    if (errorCode === 'no_active_subscription' || errorCode === 'subscription_expired') {
+      return { outcome: 'error', errorKey: 'vpn.noSubscription' }
+    }
+    return { outcome: 'error', errorKey: 'vpn.peerLimitReached' }
+  }
+}
+
 async function doServerSync(): Promise<SyncResult> {
   try {
     await refreshMe()
@@ -84,45 +130,32 @@ async function doServerSync(): Promise<SyncResult> {
 
     // Remember active protocol before sync (setActiveConfig switches to last-set protocol).
     // On first start (no localStorage, no loaded config), leave null so we default to
-    // the first available protocol (VLESS) after sync.
+    // the first available protocol after sync — AmneziaWG, which is listed first.
     const prevProtocol =
       localStorage.getItem('preferredProtocol') ?? (vpn.hasConfig ? vpn.activeProtocol : null)
 
-    // 1. Fetch WireGuard peer
-    const { data: peer } = await getMyPeerByDevice({
-      path: { device_id: vpn.deviceId! },
-    })
-
-    if (peer) {
-      const { data: configStr } = await getMyPeerConfig({
-        path: { id: peer.id },
-        throwOnError: true,
-      })
-      await vpn.setActiveConfig(configStr)
-    } else {
-      // No peer — try to create
-      if (!me.value?.subscription) {
-        return { outcome: 'error', errorKey: 'vpn.noSubscription' }
-      }
-
-      try {
-        const response = await createPeerMut.mutateAsync({
-          body: {
-            device_id: vpn.deviceId,
-            device_name: vpn.deviceName,
-          },
-        })
-        await vpn.setActiveConfig(response.config)
-      } catch (e: unknown) {
-        const errorCode = (e as Record<string, unknown>)?.error
-        if (errorCode === 'no_active_subscription' || errorCode === 'subscription_expired') {
-          return { outcome: 'error', errorKey: 'vpn.noSubscription' }
-        }
-        return { outcome: 'error', errorKey: 'vpn.peerLimitReached' }
-      }
+    // AmneziaWG is the default wg-family protocol when the server offers it; WireGuard otherwise.
+    let amneziaAvailable = false
+    try {
+      const { data: pub } = await getPublicConfig()
+      amneziaAvailable = pub?.amneziawg_available ?? false
+    } catch {
+      // Couldn't reach /config — fall back to plain WireGuard.
     }
+    const primary = amneziaAvailable ? 'amneziawg' : 'wireguard'
+    const secondary = primary === 'amneziawg' ? 'wireguard' : 'amneziawg'
 
-    // 2. Fetch VLESS config (if available on server)
+    // 1. Provision the primary (default) wg-family peer — must succeed.
+    const primaryResult = await syncWgFamilyPeer(primary, true)
+    if (primaryResult.outcome === 'error') return primaryResult
+
+    // 2. Also provision the secondary wg-family protocol when the server offers it. A device is a
+    //    single peer-limit slot, so holding both WireGuard and AmneziaWG is free — this gives the
+    //    user all switcher positions. Best-effort: don't fail the sync if the bonus peer can't be made.
+    const secondaryAvailable = secondary === 'wireguard' || amneziaAvailable
+    await syncWgFamilyPeer(secondary, secondaryAvailable)
+
+    // 3. Fetch VLESS config (per-user, no peer slot)
     try {
       const { data: vlessConfig } = await getMyVlessConfig()
       if (vlessConfig?.uri) {
@@ -132,7 +165,7 @@ async function doServerSync(): Promise<SyncResult> {
       // VLESS not available on server — skip silently
     }
 
-    // 3. Restore previously active protocol (or default to first available)
+    // 4. Restore previously active protocol (or default to first available — AmneziaWG)
     if (prevProtocol && vpn.availableProtocols.includes(prevProtocol)) {
       await vpn.setProtocol(prevProtocol)
     } else if (vpn.availableProtocols.length > 0) {
@@ -252,6 +285,7 @@ async function handleConnect() {
       console.info('[VpnCard] Connection verification failed, checking peer with server...')
       const { data: peer } = await getMyPeerByDevice({
         path: { device_id: vpn.deviceId },
+        query: { protocol: vpn.activeProtocol },
       })
       if (!peer) {
         console.info('[VpnCard] Peer not found on server, recreating...')

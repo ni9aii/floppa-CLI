@@ -162,7 +162,7 @@ export const createMyPeer = <ThrowOnError extends boolean = false>(options?: Opt
 });
 
 /**
- * Get a peer by device_id for the current user
+ * Get a peer by device_id (+ protocol) for the current user
  */
 export const getMyPeerByDevice = <ThrowOnError extends boolean = false>(options: Options<GetMyPeerByDeviceData, ThrowOnError>) => (options.client ?? client).get<GetMyPeerByDeviceResponses, GetMyPeerByDeviceErrors, ThrowOnError>({ url: '/me/peers/by-device/{device_id}', ...options });
 

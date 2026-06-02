@@ -37,6 +37,10 @@ export type CreatePeerRequest = {
     device_id?: string | null;
     device_name?: string | null;
     installation_id?: number | null;
+    /**
+     * Tunnel protocol: "wireguard" or "amneziawg". Defaults to "wireguard".
+     */
+    protocol?: string | null;
 };
 
 export type CreatePeerResponse = {
@@ -147,6 +151,10 @@ export type MyPeer = {
     download_bytes: number;
     id: number;
     last_handshake?: string | null;
+    /**
+     * Tunnel protocol: "wireguard" or "amneziawg".
+     */
+    protocol: string;
     sync_status: string;
     upload_bytes: number;
 };
@@ -196,6 +204,10 @@ export type PeerSummary = {
     id: number;
     last_handshake?: string | null;
     plan_name?: string | null;
+    /**
+     * Tunnel protocol: "wireguard" or "amneziawg".
+     */
+    protocol: string;
     sync_status: string;
     upload_bytes: number;
     user_id: number;
@@ -215,7 +227,15 @@ export type Plan = {
 };
 
 export type PublicConfig = {
+    /**
+     * Whether AmneziaWG is offered by this server (the client defaults to it when available).
+     */
+    amneziawg_available: boolean;
     telegram_bot_username?: string | null;
+    /**
+     * Whether VLESS+REALITY is offered by this server.
+     */
+    vless_available: boolean;
 };
 
 export type SetCredentialRequest = {
@@ -817,7 +837,12 @@ export type GetMyPeerByDeviceData = {
          */
         device_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Tunnel protocol (wireguard|amneziawg)
+         */
+        protocol?: string;
+    };
     url: '/me/peers/by-device/{device_id}';
 };
 

@@ -60,18 +60,24 @@ const vlessLoading = ref(false)
 const vlessRegenerateConfirmOpen = ref(false)
 const regenerateMut = useMutation(regenerateMyVlessConfigMutation())
 
+// Slots are counted per-device: a client device (which may hold both a WireGuard and an
+// AmneziaWG peer) is one slot; each standalone exported config (no device) is one slot.
+const slotsUsed = computed(() => {
+  if (!peers.value) return 0
+  const active = peers.value.filter((p) => p.sync_status !== 'pending_remove')
+  const devices = new Set(active.filter((p) => p.device_id).map((p) => p.device_id))
+  const standalone = active.filter((p) => !p.device_id).length
+  return devices.size + standalone
+})
+
 const canCreatePeer = computed(() => {
-  if (!me.value?.subscription) return false
-  if (!peers.value) return false
-  const activePeers = peers.value.filter((p) => p.sync_status !== 'pending_remove').length
-  return activePeers < me.value.subscription.max_peers
+  if (!me.value?.subscription || !peers.value) return false
+  return slotsUsed.value < me.value.subscription.max_peers
 })
 
 const peersRemaining = computed(() => {
-  if (!me.value?.subscription) return 0
-  if (!peers.value) return 0
-  const activePeers = peers.value.filter((p) => p.sync_status !== 'pending_remove').length
-  return me.value.subscription.max_peers - activePeers
+  if (!me.value?.subscription || !peers.value) return 0
+  return me.value.subscription.max_peers - slotsUsed.value
 })
 
 async function createPeer() {
@@ -373,7 +379,12 @@ async function doRegenerateVless() {
           <UCard v-for="peer in peers" :key="peer.id">
             <div class="flex justify-between items-center mb-2">
               <span class="font-mono text-lg font-semibold">{{ peer.assigned_ip }}</span>
-              <StatusBadge :status="peer.sync_status as PeerSyncStatus" />
+              <div class="flex items-center gap-2">
+                <UBadge color="neutral" variant="subtle" size="sm">
+                  {{ t(`vpn.${peer.protocol}`) }}
+                </UBadge>
+                <StatusBadge :status="peer.sync_status as PeerSyncStatus" />
+              </div>
             </div>
             <div
               v-if="peer.device_name"

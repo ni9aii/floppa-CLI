@@ -6,16 +6,66 @@ use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
+/// Runtime parameters for one protocol's interface. WireGuard is always present;
+/// AmneziaWG is added when `[amneziawg]` is configured. Each peer is routed to its
+/// target by its `protocol` column.
+struct ProtoTarget {
+    /// DB protocol string ("wireguard" | "amneziawg").
+    protocol: &'static str,
+    /// CLI tool — `wg` or `awg` (a drop-in superset).
+    tool: &'static str,
+    interface: String,
+    rate_limit_enabled: bool,
+    total_bandwidth_mbps: u32,
+}
+
+/// Build the list of active protocol targets from config (WireGuard + optional AmneziaWG).
+fn proto_targets(config: &Config) -> Vec<ProtoTarget> {
+    let mut targets = vec![ProtoTarget {
+        protocol: "wireguard",
+        tool: "wg",
+        interface: config.wireguard.interface.clone(),
+        rate_limit_enabled: config
+            .wireguard
+            .rate_limit
+            .as_ref()
+            .map(|r| r.enabled)
+            .unwrap_or(false),
+        total_bandwidth_mbps: config
+            .wireguard
+            .rate_limit
+            .as_ref()
+            .map(|r| r.total_bandwidth_mbps)
+            .unwrap_or(1000),
+    }];
+
+    if let Some(awg) = &config.amneziawg {
+        targets.push(ProtoTarget {
+            protocol: "amneziawg",
+            tool: "awg",
+            interface: awg.interface.clone(),
+            rate_limit_enabled: awg.rate_limit.as_ref().map(|r| r.enabled).unwrap_or(false),
+            total_bandwidth_mbps: awg
+                .rate_limit
+                .as_ref()
+                .map(|r| r.total_bandwidth_mbps)
+                .unwrap_or(1000),
+        });
+    }
+
+    targets
+}
+
 /// Main synchronization loop using PostgreSQL LISTEN/NOTIFY
 /// - Listens for 'peer_changed' notifications for immediate sync
 /// - Periodic sync for traffic stats and expired subscriptions
 pub async fn run_sync_loop(pool: &DbPool, config: &Config) -> Result<()> {
-    // Initialize traffic control if enabled
-    if let Some(ref rate_limit) = config.wireguard.rate_limit
-        && rate_limit.enabled
-    {
-        info!("Initializing traffic control");
-        crate::tc::setup_tc(&config.wireguard.interface, rate_limit.total_bandwidth_mbps)?;
+    // Initialize traffic control if enabled (per protocol interface)
+    for target in proto_targets(config) {
+        if target.rate_limit_enabled {
+            info!(interface = %target.interface, "Initializing traffic control");
+            crate::tc::setup_tc(&target.interface, target.total_bandwidth_mbps)?;
+        }
     }
 
     // Initial sync on startup
@@ -45,9 +95,11 @@ pub async fn run_sync_loop(pool: &DbPool, config: &Config) -> Result<()> {
             // Seed with current WG values so the first cycle computes a zero delta
             // instead of treating all accumulated counters as new traffic.
             let mut prev_wg_counters: HashMap<String, (u64, u64)> = HashMap::new();
-            if let Ok(stats) = crate::wg::get_peer_stats(&config.wireguard.interface) {
-                for (public_key, tx, rx, _) in stats {
-                    prev_wg_counters.insert(public_key, (tx, rx));
+            for target in proto_targets(&config) {
+                if let Ok(stats) = crate::wg::get_peer_stats(target.tool, &target.interface) {
+                    for (public_key, tx, rx, _) in stats {
+                        prev_wg_counters.insert(public_key, (tx, rx));
+                    }
                 }
             }
             // Map public_key → (user_id, peer_id) for metrics labels
@@ -151,20 +203,15 @@ async fn listen_for_changes(pool: &DbPool, config: &Config) -> Result<()> {
 /// Called on startup after tc infrastructure is (re)created, since tc rules
 /// are ephemeral and don't survive daemon restarts.
 async fn reapply_rate_limits(pool: &DbPool, config: &Config) -> Result<()> {
-    let rate_limit_enabled = config
-        .wireguard
-        .rate_limit
-        .as_ref()
-        .map(|r| r.enabled)
-        .unwrap_or(false);
-
-    if !rate_limit_enabled {
+    let targets = proto_targets(config);
+    if targets.iter().all(|t| !t.rate_limit_enabled) {
         return Ok(());
     }
+    let target_for = |protocol: &str| targets.iter().find(|t| t.protocol == protocol);
 
     let peers = sqlx::query!(
         r#"
-        SELECT p.id, p.assigned_ip AS "assigned_ip!",
+        SELECT p.id, p.assigned_ip AS "assigned_ip!", p.protocol,
                pl.default_speed_limit_mbps AS speed_limit_mbps
         FROM peers p
         LEFT JOIN subscriptions s ON s.user_id = p.user_id
@@ -178,20 +225,22 @@ async fn reapply_rate_limits(pool: &DbPool, config: &Config) -> Result<()> {
 
     let mut applied = 0u32;
     for peer in &peers {
+        let Some(target) = target_for(&peer.protocol) else {
+            continue;
+        };
+        if !target.rate_limit_enabled {
+            continue;
+        }
         if let Some(speed_limit) = peer.speed_limit_mbps {
             // Try update first (class may already exist from sync_peers),
             // fall back to add if the class doesn't exist yet
             let result = crate::tc::update_peer_limit(
-                &config.wireguard.interface,
+                &target.interface,
                 &peer.assigned_ip,
                 speed_limit as u32,
             )
             .or_else(|_| {
-                crate::tc::add_peer_limit(
-                    &config.wireguard.interface,
-                    &peer.assigned_ip,
-                    speed_limit as u32,
-                )
+                crate::tc::add_peer_limit(&target.interface, &peer.assigned_ip, speed_limit as u32)
             });
             if let Err(e) = result {
                 error!(peer_id = peer.id, error = %e, "Failed to reapply rate limit");
@@ -210,19 +259,17 @@ async fn reapply_rate_limits(pool: &DbPool, config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Sync pending peer additions/removals with WireGuard
+/// Sync pending peer additions/removals with WireGuard / AmneziaWG.
+/// Each peer is routed to its protocol's interface.
 async fn sync_peers(pool: &DbPool, config: &Config) -> Result<()> {
-    let rate_limit_enabled = config
-        .wireguard
-        .rate_limit
-        .as_ref()
-        .map(|r| r.enabled)
-        .unwrap_or(false);
+    let targets = proto_targets(config);
+    let target_for = |protocol: &str| targets.iter().find(|t| t.protocol == protocol);
 
     // Process pending additions
     let pending_add = sqlx::query!(
         r#"
         SELECT p.id, p.public_key AS "public_key!", p.assigned_ip AS "assigned_ip!", p.user_id,
+               p.protocol,
                pl.default_speed_limit_mbps AS speed_limit_mbps
         FROM peers p
         LEFT JOIN subscriptions s ON s.user_id = p.user_id
@@ -235,18 +282,30 @@ async fn sync_peers(pool: &DbPool, config: &Config) -> Result<()> {
     .await?;
 
     for peer in pending_add {
-        info!(peer_id = peer.id, ip = %peer.assigned_ip, "Adding peer to WireGuard");
+        let Some(target) = target_for(&peer.protocol) else {
+            error!(
+                peer_id = peer.id,
+                protocol = %peer.protocol,
+                "No configured interface for peer protocol — skipping"
+            );
+            continue;
+        };
+
+        info!(peer_id = peer.id, ip = %peer.assigned_ip, interface = %target.interface, "Adding peer");
 
         match crate::wg::add_peer(
-            &config.wireguard.interface,
+            target.tool,
+            &target.interface,
             &peer.public_key,
             &peer.assigned_ip,
         ) {
             Ok(()) => {
                 // Apply rate limit if configured
-                if rate_limit_enabled && let Some(speed_limit) = peer.speed_limit_mbps {
+                if target.rate_limit_enabled
+                    && let Some(speed_limit) = peer.speed_limit_mbps
+                {
                     if let Err(e) = crate::tc::add_peer_limit(
-                        &config.wireguard.interface,
+                        &target.interface,
                         &peer.assigned_ip,
                         speed_limit as u32,
                     ) {
@@ -272,20 +331,29 @@ async fn sync_peers(pool: &DbPool, config: &Config) -> Result<()> {
 
     // Process pending removals
     let pending_remove = sqlx::query!(
-        r#"SELECT id, public_key AS "public_key!", assigned_ip AS "assigned_ip!" FROM peers WHERE sync_status = 'pending_remove'"#,
+        r#"SELECT id, public_key AS "public_key!", assigned_ip AS "assigned_ip!", protocol FROM peers WHERE sync_status = 'pending_remove'"#,
     )
     .fetch_all(pool)
     .await?;
 
     for peer in pending_remove {
-        info!(peer_id = peer.id, "Removing peer from WireGuard");
+        let Some(target) = target_for(&peer.protocol) else {
+            error!(
+                peer_id = peer.id,
+                protocol = %peer.protocol,
+                "No configured interface for peer protocol — skipping removal"
+            );
+            continue;
+        };
+
+        info!(peer_id = peer.id, interface = %target.interface, "Removing peer");
 
         // Remove rate limit first (ignore errors - might not have one)
-        if rate_limit_enabled {
-            let _ = crate::tc::remove_peer_limit(&config.wireguard.interface, &peer.assigned_ip);
+        if target.rate_limit_enabled {
+            let _ = crate::tc::remove_peer_limit(&target.interface, &peer.assigned_ip);
         }
 
-        match crate::wg::remove_peer(&config.wireguard.interface, &peer.public_key) {
+        match crate::wg::remove_peer(target.tool, &target.interface, &peer.public_key) {
             Ok(()) => {
                 sqlx::query!(
                     "UPDATE peers SET sync_status = 'removed' WHERE id = $1",
@@ -318,21 +386,16 @@ async fn periodic_sync(
 
 /// Update rate limit for a user when their subscription changes
 async fn update_user_rate_limit(pool: &DbPool, config: &Config, user_id: i64) -> Result<()> {
-    let rate_limit_enabled = config
-        .wireguard
-        .rate_limit
-        .as_ref()
-        .map(|r| r.enabled)
-        .unwrap_or(false);
-
-    if !rate_limit_enabled {
+    let targets = proto_targets(config);
+    if targets.iter().all(|t| !t.rate_limit_enabled) {
         return Ok(());
     }
+    let target_for = |protocol: &str| targets.iter().find(|t| t.protocol == protocol);
 
-    // Get all active WireGuard peers and current speed limit from plan
+    // Get all active peers (any protocol) and current speed limit from plan
     let peers = sqlx::query!(
         r#"
-        SELECT p.id, p.assigned_ip AS "assigned_ip!",
+        SELECT p.id, p.assigned_ip AS "assigned_ip!", p.protocol,
                pl.default_speed_limit_mbps AS speed_limit_mbps
         FROM peers p
         LEFT JOIN subscriptions s ON s.user_id = p.user_id
@@ -348,18 +411,24 @@ async fn update_user_rate_limit(pool: &DbPool, config: &Config, user_id: i64) ->
     if peers.is_empty() {
         debug!(
             user_id,
-            "No active WireGuard peers for user, skipping rate limit update"
+            "No active peers for user, skipping rate limit update"
         );
         return Ok(());
     }
 
     for peer in peers {
+        let Some(target) = target_for(&peer.protocol) else {
+            continue;
+        };
+        if !target.rate_limit_enabled {
+            continue;
+        }
         match peer.speed_limit_mbps {
             Some(speed_limit) => {
                 // Update or add rate limit
                 // Try update first, if it fails (class doesn't exist), add new
                 if crate::tc::update_peer_limit(
-                    &config.wireguard.interface,
+                    &target.interface,
                     &peer.assigned_ip,
                     speed_limit as u32,
                 )
@@ -367,7 +436,7 @@ async fn update_user_rate_limit(pool: &DbPool, config: &Config, user_id: i64) ->
                 {
                     // Class might not exist, try adding
                     crate::tc::add_peer_limit(
-                        &config.wireguard.interface,
+                        &target.interface,
                         &peer.assigned_ip,
                         speed_limit as u32,
                     )?;
@@ -381,8 +450,7 @@ async fn update_user_rate_limit(pool: &DbPool, config: &Config, user_id: i64) ->
             }
             None => {
                 // No speed limit (plan is unlimited or no active subscription)
-                let _ =
-                    crate::tc::remove_peer_limit(&config.wireguard.interface, &peer.assigned_ip);
+                let _ = crate::tc::remove_peer_limit(&target.interface, &peer.assigned_ip);
                 info!(
                     user_id,
                     peer_id = peer.id,
@@ -408,7 +476,17 @@ async fn update_traffic_stats(
     prev_wg_counters: &mut HashMap<String, (u64, u64)>,
     peer_user_map: &HashMap<String, (i64, i64)>,
 ) -> Result<()> {
-    let stats = crate::wg::get_peer_stats(&config.wireguard.interface)?;
+    // Collect stats from every protocol interface; public keys are unique across protocols,
+    // so the prev-counter map and peer→user map stay keyed by public_key.
+    let mut stats: crate::wg::PeerStats = Vec::new();
+    for target in proto_targets(config) {
+        match crate::wg::get_peer_stats(target.tool, &target.interface) {
+            Ok(mut s) => stats.append(&mut s),
+            Err(e) => {
+                debug!(interface = %target.interface, error = %e, "Failed to read peer stats")
+            }
+        }
+    }
 
     for (public_key, wg_tx, wg_rx, last_handshake) in &stats {
         let (prev_tx, prev_rx) = prev_wg_counters.get(public_key).copied().unwrap_or((0, 0));

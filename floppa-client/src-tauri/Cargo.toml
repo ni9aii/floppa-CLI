@@ -40,7 +40,7 @@ async-trait = "0.1"
 ipnetwork = "0.21"
 
 # gotatun - WireGuard implementation (fork of Mullvad's boringtun)
-gotatun = { git = "https://github.com/okhsunrog/gotatun", rev = "efcedee", features = ["device", "tun"] }
+gotatun = { git = "https://github.com/okhsunrog/gotatun", rev = "7005e0c", features = ["device", "tun"] }
 # Uncomment for local development, comment out before commit/push:
 # gotatun = { path = "../../../rust/gotatun/gotatun", features = ["device", "tun"] }
 tun = { version = "0.8", features = ["async"] }

@@ -9,7 +9,7 @@ name = "floppa-cli"
 path = "src/main.rs"
 
 [dependencies]
-gotatun = { git = "https://github.com/okhsunrog/gotatun", rev = "efcedee", features = ["device", "tun"] }
+gotatun = { git = "https://github.com/okhsunrog/gotatun", rev = "7005e0c", features = ["device", "tun"] }
 tun = { version = "0.8", features = ["async"] }
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["json"] }

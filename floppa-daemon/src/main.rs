@@ -41,6 +41,21 @@ async fn main() -> Result<()> {
         "WireGuard interface ready"
     );
 
+    // Ensure AmneziaWG interface exists (if configured)
+    if let Some(ref awg) = config.amneziawg {
+        let awg_private_key = secrets.awg_private_key.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("amneziawg configured but awg_private_key secret is missing")
+        })?;
+        let awg_public_key = secrets.awg_public_key()?;
+        wg::ensure_awg_interface(awg, awg_private_key)?;
+        info!(
+            interface = %awg.interface,
+            port = awg.get_listen_port(),
+            public_key = %awg_public_key,
+            "AmneziaWG interface ready"
+        );
+    }
+
     // Start Prometheus metrics exporter
     metrics_exporter_prometheus::PrometheusBuilder::new()
         .with_http_listener(([127, 0, 0, 1], 9101))
@@ -73,7 +88,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Clean up tc rules on exit
+    // Clean up tc rules on exit (per protocol interface)
     if let Some(ref rate_limit) = config_for_shutdown.wireguard.rate_limit
         && rate_limit.enabled
     {
@@ -81,6 +96,12 @@ async fn main() -> Result<()> {
         if let Err(e) = tc::cleanup_tc(&config_for_shutdown.wireguard.interface) {
             error!(error = %e, "Failed to clean up traffic control");
         }
+    }
+    if let Some(ref awg) = config_for_shutdown.amneziawg
+        && awg.rate_limit.as_ref().map(|r| r.enabled).unwrap_or(false)
+        && let Err(e) = tc::cleanup_tc(&awg.interface)
+    {
+        error!(error = %e, "Failed to clean up AmneziaWG traffic control");
     }
 
     info!("floppa-daemon stopped");

@@ -306,7 +306,7 @@ export const createMyPeerMutation = (options?: Partial<Options<CreateMyPeerData>
 export const getMyPeerByDeviceQueryKey = (options: Options<GetMyPeerByDeviceData>) => createQueryKey('getMyPeerByDevice', options);
 
 /**
- * Get a peer by device_id for the current user
+ * Get a peer by device_id (+ protocol) for the current user
  */
 export const getMyPeerByDeviceQuery = defineQueryOptions<Options<GetMyPeerByDeviceData>, GetMyPeerByDeviceResponse, GetMyPeerByDeviceError>((options: Options<GetMyPeerByDeviceData>) => ({
     key: getMyPeerByDeviceQueryKey(options),

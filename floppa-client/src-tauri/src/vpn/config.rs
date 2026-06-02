@@ -137,7 +137,7 @@ pub fn load_configs() -> Option<SavedVpnConfigs> {
                         let configs = SavedVpnConfigs {
                             active_protocol: "wireguard".to_string(),
                             wireguard: Some(wg),
-                            vless: None,
+                            ..Default::default()
                         };
                         return Some(configs);
                     }
@@ -196,12 +196,17 @@ fn parse_stored_configs(stored: &str) -> Option<SavedVpnConfigs> {
             ProtocolConfig::WireGuard(wg) => SavedVpnConfigs {
                 active_protocol: "wireguard".to_string(),
                 wireguard: Some(wg),
-                vless: None,
+                ..Default::default()
+            },
+            ProtocolConfig::AmneziaWg(awg) => SavedVpnConfigs {
+                active_protocol: "amneziawg".to_string(),
+                amneziawg: Some(awg),
+                ..Default::default()
             },
             ProtocolConfig::Vless(vless) => SavedVpnConfigs {
                 active_protocol: "vless".to_string(),
-                wireguard: None,
                 vless: Some(vless),
+                ..Default::default()
             },
         });
     }
@@ -212,7 +217,7 @@ fn parse_stored_configs(stored: &str) -> Option<SavedVpnConfigs> {
             Some(SavedVpnConfigs {
                 active_protocol: "wireguard".to_string(),
                 wireguard: Some(wg),
-                vless: None,
+                ..Default::default()
             })
         }
         Err(e) => {

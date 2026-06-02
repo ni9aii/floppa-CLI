@@ -575,6 +575,8 @@ pub struct PeerSummary {
     username: Option<String>,
     assigned_ip: String,
     sync_status: String,
+    /// Tunnel protocol: "wireguard" or "amneziawg".
+    protocol: String,
     download_bytes: i64,
     upload_bytes: i64,
     last_handshake: Option<chrono::DateTime<Utc>>,
@@ -604,7 +606,7 @@ pub(super) async fn list_peers(
     let rows = sqlx::query!(
         r#"
         SELECT p.id, p.user_id, COALESCE(u.username, CONCAT_WS(' ', u.first_name, u.last_name)) AS username,
-               p.assigned_ip, p.sync_status, p.last_handshake,
+               p.assigned_ip, p.sync_status, p.protocol, p.last_handshake,
                ai.device_name, ai.device_id AS "device_id?", ai.app_version AS client_version,
                (SELECT pl.display_name FROM subscriptions s JOIN plans pl ON s.plan_id = pl.id WHERE s.user_id = u.id AND (s.expires_at IS NULL OR s.expires_at > NOW()) ORDER BY s.expires_at DESC NULLS FIRST LIMIT 1) AS plan_name,
                (u.vless_uuid IS NOT NULL) AS "has_vless!"
@@ -633,6 +635,7 @@ pub(super) async fn list_peers(
                 username: r.username,
                 assigned_ip: r.assigned_ip,
                 sync_status: r.sync_status,
+                protocol: r.protocol,
                 download_bytes: download,
                 upload_bytes: upload,
                 last_handshake: r.last_handshake,

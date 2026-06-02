@@ -61,6 +61,7 @@ async function doDeletePeer() {
 
 const columns = computed<TableColumn<PeerSummary>[]>(() => [
   { accessorKey: 'assigned_ip', header: t('adminPeers.ip') },
+  { accessorKey: 'protocol', header: t('adminPeers.protocol') },
   { accessorKey: 'username', header: t('adminPeers.user') },
   { accessorKey: 'device_name', header: t('adminPeers.device') },
   { accessorKey: 'client_version', header: t('adminPeers.version') },
@@ -100,6 +101,11 @@ const columns = computed<TableColumn<PeerSummary>[]>(() => [
         >
           <template #assigned_ip-cell="{ row }">
             <span class="font-mono font-medium">{{ row.original.assigned_ip }}</span>
+          </template>
+          <template #protocol-cell="{ row }">
+            <UBadge color="neutral" variant="subtle" size="sm">
+              {{ t(`vpn.${row.original.protocol}`) }}
+            </UBadge>
           </template>
           <template #username-cell="{ row }">
             {{ row.original.username || '-' }}

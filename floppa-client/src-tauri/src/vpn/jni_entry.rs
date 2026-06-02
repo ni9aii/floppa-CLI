@@ -5,7 +5,7 @@
 //! or VLESS tunnel, and run the tarpc RPC server.
 
 use super::rpc_server::{self, RpcServerHandle};
-use super::state::{VlessVpnConfig, WgConfig};
+use super::state::{AwgConfig, VlessVpnConfig, WgConfig, config_str_is_amneziawg};
 use super::tunnel::{self, TunnelManager};
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::jint;
@@ -234,6 +234,24 @@ pub extern "C" fn Java_dev_okhsunrog_floppavpn_vpn_FloppaVpnService_nativeStartT
                     return;
                 }
                 info!("VLESS tunnel started successfully");
+            } else if config_str_is_amneziawg(&config_str) {
+                // AmneziaWG protocol (WireGuard + obfuscation)
+                let awg = match AwgConfig::from_config_str(&config_str) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("Failed to parse AmneziaWG config: {e}");
+                        return;
+                    }
+                };
+
+                if let Err(e) = tunnel_manager
+                    .start_wireguard_with_fd(&awg.wg, tun_fd as RawFd, Some(&awg.obfuscation))
+                    .await
+                {
+                    error!("Failed to start AmneziaWG tunnel: {e}");
+                    return;
+                }
+                info!("AmneziaWG tunnel started successfully");
             } else {
                 // WireGuard protocol
                 let config = match WgConfig::from_config_str(&config_str) {
@@ -245,7 +263,7 @@ pub extern "C" fn Java_dev_okhsunrog_floppavpn_vpn_FloppaVpnService_nativeStartT
                 };
 
                 if let Err(e) = tunnel_manager
-                    .start_wireguard_with_fd(&config, tun_fd as RawFd)
+                    .start_wireguard_with_fd(&config, tun_fd as RawFd, None)
                     .await
                 {
                     error!("Failed to start WireGuard tunnel: {e}");

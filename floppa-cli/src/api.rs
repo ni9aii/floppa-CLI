@@ -32,8 +32,14 @@ pub struct MyPeer {
     pub id: i64,
     pub assigned_ip: String,
     pub sync_status: String,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
     pub device_name: Option<String>,
     pub device_id: Option<String>,
+}
+
+fn default_protocol() -> String {
+    "wireguard".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +53,7 @@ pub struct CreatePeerResponse {
 struct CreatePeerRequest {
     device_name: Option<String>,
     device_id: Option<String>,
+    protocol: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,7 +131,11 @@ impl ApiClient {
         resp.json().await.context("Failed to parse peers response")
     }
 
-    pub async fn create_peer(&self, device_name: Option<String>) -> Result<CreatePeerResponse> {
+    pub async fn create_peer(
+        &self,
+        device_name: Option<String>,
+        protocol: Option<&str>,
+    ) -> Result<CreatePeerResponse> {
         let resp = self
             .client
             .post(self.url("/me/peers"))
@@ -132,6 +143,7 @@ impl ApiClient {
             .json(&CreatePeerRequest {
                 device_name,
                 device_id: None,
+                protocol: protocol.map(|p| p.to_string()),
             })
             .send()
             .await?;
@@ -166,19 +178,24 @@ impl ApiClient {
         resp.text().await.context("Failed to read config response")
     }
 
-    /// Find an existing active WireGuard peer, or create a new one.
-    pub async fn find_or_create_peer(&self) -> Result<String> {
+    /// Find an existing active peer for `protocol` ("wireguard" | "amneziawg"), or create one.
+    pub async fn find_or_create_peer(&self, protocol: &str) -> Result<String> {
         let peers = self.list_peers().await?;
 
-        let active = peers.iter().find(|p| p.sync_status == "active");
+        let active = peers
+            .iter()
+            .find(|p| p.sync_status == "active" && p.protocol == protocol);
 
         let peer_id = if let Some(peer) = active {
-            eprintln!("Using existing peer: {} ({})", peer.assigned_ip, peer.id);
+            eprintln!(
+                "Using existing {protocol} peer: {} ({})",
+                peer.assigned_ip, peer.id
+            );
             peer.id
         } else {
             let hostname = hostname();
-            eprintln!("Creating new WireGuard peer (device: {hostname})...");
-            let created = self.create_peer(Some(hostname)).await?;
+            eprintln!("Creating new {protocol} peer (device: {hostname})...");
+            let created = self.create_peer(Some(hostname), Some(protocol)).await?;
             eprintln!("Peer created: {} ({})", created.assigned_ip, created.id);
             return Ok(created.config);
         };
