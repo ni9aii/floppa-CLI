@@ -144,6 +144,29 @@ async fn fetch_via_url(state: &AppState, url: &str) -> Option<(Vec<u8>, String)>
     Some((bytes, content_type))
 }
 
+/// Trigger a (stale-gated) avatar refresh for the given users — looks up their telegram_id +
+/// photo_url and spawns a background fetch. Used to populate avatars on demand for users that were
+/// already logged in before this feature existed (the auth-time trigger only fires on a fresh login).
+async fn trigger_refresh_for_users(state: &AppState, user_ids: &[i64]) {
+    if user_ids.is_empty() {
+        return;
+    }
+    let rows = sqlx::query!(
+        "SELECT id, telegram_id, photo_url FROM users WHERE id = ANY($1) AND telegram_id IS NOT NULL",
+        user_ids,
+    )
+    .fetch_all(&state.pool)
+    .await;
+
+    if let Ok(rows) = rows {
+        for r in rows {
+            if let Some(tg) = r.telegram_id {
+                spawn_refresh_if_stale(state, r.id, tg, r.photo_url);
+            }
+        }
+    }
+}
+
 // =============================================================================
 // Serving
 // =============================================================================
@@ -202,6 +225,9 @@ pub(super) async fn get_my_avatar(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
+    // Populate/refresh on demand (stale-gated) so already-logged-in users get an avatar without
+    // re-authenticating. Spawned in the background; the client retries the 404 shortly after.
+    trigger_refresh_for_users(&state, &[auth.user_id]).await;
     serve_avatar(&state, auth.user_id, &headers).await
 }
 
@@ -260,7 +286,7 @@ pub(super) async fn get_avatars_batch(
     .fetch_all(&state.pool)
     .await?;
 
-    let map = rows
+    let map: HashMap<String, String> = rows
         .into_iter()
         .map(|r| {
             let data_url = format!(
@@ -271,6 +297,14 @@ pub(super) async fn get_avatars_batch(
             (r.user_id.to_string(), data_url)
         })
         .collect();
+
+    // Populate avatars for requested users we don't have yet (stale-gated, background), so the
+    // admin list fills in on subsequent loads without requiring each user to re-authenticate.
+    let missing: Vec<i64> = ids
+        .into_iter()
+        .filter(|id| !map.contains_key(&id.to_string()))
+        .collect();
+    trigger_refresh_for_users(&state, &missing).await;
 
     Ok(Json(map))
 }
