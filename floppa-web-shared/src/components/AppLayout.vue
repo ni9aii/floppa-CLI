@@ -258,7 +258,7 @@ const mobileNavItems = computed(() => {
         <div class="flex flex-col h-full">
           <nav class="flex flex-col gap-1">
             <template
-              v-for="section in auth.isAdmin
+              v-for="section in (auth.isAdmin
                 ? [
                     { items: mobileNavItems.slice(0, 2 + extraNavItems.length) },
                     {
@@ -266,7 +266,10 @@ const mobileNavItems = computed(() => {
                       items: mobileNavItems.slice(2 + extraNavItems.length),
                     },
                   ]
-                : [{ items: mobileNavItems }]"
+                : [{ items: mobileNavItems }]) as {
+                label?: string
+                items: typeof mobileNavItems
+              }[]"
               :key="section.label ?? 'main'"
             >
               <div
