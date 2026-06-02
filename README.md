@@ -78,6 +78,10 @@ graph TD
 - User management — create, search, subscription control
 - Plan management — speed limits, peer limits, pricing
 - Peer monitoring — sync status, traffic, last handshake
+- Paginated lists (users, peers, installations, VLESS) — 100 rows/page
+
+### Avatar Caching
+Telegram profile photos are served from a CDN that's unreachable from clients in Russia (and sends no CORS headers), so the server downloads each user's photo — via the Bot API (`getUserProfilePhotos` → `getFile`), falling back to the stored `photo_url` — caches it as a blob in PostgreSQL, and serves it from our own origin. Populated on demand (first avatar request triggers a background fetch) with a periodic TTL refresh; the admin user list fetches avatars for the visible page in one batch.
 
 ### CLI Client
 - Standalone WireGuard / AmneziaWG / VLESS client (`floppa-cli`) for headless/server use (`--protocol`)
