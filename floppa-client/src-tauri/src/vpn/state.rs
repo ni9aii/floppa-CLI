@@ -395,6 +395,194 @@ impl VlessVpnConfig {
     }
 }
 
+/// AmneziaWG 2.0 obfuscation parameters, parsed from the `[Interface]` section of an
+/// AmneziaWG `.conf`. Applied to the gotatun device via `.with_awg(...)`. `H1`–`H4` are
+/// strings (single value or "lo-hi" range); `I1`–`I5` are CPS tag specs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwgObfuscation {
+    pub jc: u32,
+    pub jmin: u32,
+    pub jmax: u32,
+    pub s1: u32,
+    pub s2: u32,
+    pub s3: u32,
+    pub s4: u32,
+    pub h1: String,
+    pub h2: String,
+    pub h3: String,
+    pub h4: String,
+    pub i1: Option<String>,
+    pub i2: Option<String>,
+    pub i3: Option<String>,
+    pub i4: Option<String>,
+    pub i5: Option<String>,
+}
+
+impl Default for AwgObfuscation {
+    /// Defaults to standard-WireGuard behaviour (no obfuscation); real values come from the
+    /// server-issued config.
+    fn default() -> Self {
+        Self {
+            jc: 0,
+            jmin: 0,
+            jmax: 0,
+            s1: 0,
+            s2: 0,
+            s3: 0,
+            s4: 0,
+            h1: "1".into(),
+            h2: "2".into(),
+            h3: "3".into(),
+            h4: "4".into(),
+            i1: None,
+            i2: None,
+            i3: None,
+            i4: None,
+            i5: None,
+        }
+    }
+}
+
+/// AmneziaWG config: a WireGuard config plus interface-wide obfuscation. The tunnel runs
+/// through the same gotatun device as WireGuard, with the obfuscation applied at build time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwgConfig {
+    pub wg: WgConfig,
+    pub obfuscation: AwgObfuscation,
+}
+
+/// AmneziaWG `[Interface]` obfuscation keys, used to tell an AmneziaWG `.conf` from a plain
+/// WireGuard one.
+const AWG_OBF_KEYS: &[&str] = &[
+    "jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "i1", "i2", "i3", "i4",
+    "i5",
+];
+
+/// True if a config string is an AmneziaWG `.conf` (i.e. its `[Interface]` carries obfuscation
+/// params). Used to route content-sniffed configs.
+pub fn config_str_is_amneziawg(config: &str) -> bool {
+    let mut in_interface = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.eq_ignore_ascii_case("[Interface]") {
+            in_interface = true;
+            continue;
+        }
+        if line.starts_with('[') {
+            in_interface = false;
+            continue;
+        }
+        if in_interface
+            && let Some((k, _)) = line.split_once('=')
+            && AWG_OBF_KEYS.contains(&k.trim().to_lowercase().as_str())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+impl AwgConfig {
+    /// Parse an AmneziaWG `.conf` (WireGuard config + obfuscation params).
+    pub fn from_config_str(config: &str) -> Result<Self, String> {
+        let wg = WgConfig::from_config_str(config)?;
+        let mut obf = AwgObfuscation::default();
+
+        let mut in_interface = false;
+        for line in config.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if line.eq_ignore_ascii_case("[Interface]") {
+                in_interface = true;
+                continue;
+            }
+            if line.starts_with('[') {
+                in_interface = false;
+                continue;
+            }
+            if !in_interface {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                let k = k.trim().to_lowercase();
+                let v = v.trim().to_string();
+                match k.as_str() {
+                    "jc" => obf.jc = v.parse().unwrap_or(0),
+                    "jmin" => obf.jmin = v.parse().unwrap_or(0),
+                    "jmax" => obf.jmax = v.parse().unwrap_or(0),
+                    "s1" => obf.s1 = v.parse().unwrap_or(0),
+                    "s2" => obf.s2 = v.parse().unwrap_or(0),
+                    "s3" => obf.s3 = v.parse().unwrap_or(0),
+                    "s4" => obf.s4 = v.parse().unwrap_or(0),
+                    "h1" => obf.h1 = v,
+                    "h2" => obf.h2 = v,
+                    "h3" => obf.h3 = v,
+                    "h4" => obf.h4 = v,
+                    "i1" => obf.i1 = (!v.is_empty()).then_some(v),
+                    "i2" => obf.i2 = (!v.is_empty()).then_some(v),
+                    "i3" => obf.i3 = (!v.is_empty()).then_some(v),
+                    "i4" => obf.i4 = (!v.is_empty()).then_some(v),
+                    "i5" => obf.i5 = (!v.is_empty()).then_some(v),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(Self {
+            wg,
+            obfuscation: obf,
+        })
+    }
+
+    /// Render back to an AmneziaWG `.conf` (used for the Android IPC handoff and export).
+    pub fn to_config_str(&self) -> String {
+        let wg = &self.wg;
+        let o = &self.obfuscation;
+        let mut s = String::from("[Interface]\n");
+        s.push_str(&format!("PrivateKey = {}\n", wg.private_key));
+        s.push_str(&format!("Address = {}\n", wg.address));
+        if let Some(dns) = &wg.dns {
+            s.push_str(&format!("DNS = {dns}\n"));
+        }
+        if let Some(mtu) = wg.mtu {
+            s.push_str(&format!("MTU = {mtu}\n"));
+        }
+        s.push_str(&format!(
+            "Jc = {}\nJmin = {}\nJmax = {}\n",
+            o.jc, o.jmin, o.jmax
+        ));
+        s.push_str(&format!(
+            "S1 = {}\nS2 = {}\nS3 = {}\nS4 = {}\n",
+            o.s1, o.s2, o.s3, o.s4
+        ));
+        s.push_str(&format!(
+            "H1 = {}\nH2 = {}\nH3 = {}\nH4 = {}\n",
+            o.h1, o.h2, o.h3, o.h4
+        ));
+        for (n, val) in [(1, &o.i1), (2, &o.i2), (3, &o.i3), (4, &o.i4), (5, &o.i5)] {
+            if let Some(spec) = val {
+                s.push_str(&format!("I{n} = {spec}\n"));
+            }
+        }
+        s.push_str("\n[Peer]\n");
+        s.push_str(&format!("PublicKey = {}\n", wg.peer_public_key));
+        if let Some(psk) = &wg.peer_preshared_key {
+            s.push_str(&format!("PresharedKey = {psk}\n"));
+        }
+        s.push_str(&format!("Endpoint = {}\n", wg.peer_endpoint));
+        s.push_str(&format!("AllowedIPs = {}\n", wg.allowed_ips));
+        if let Some(keepalive) = wg.persistent_keepalive {
+            s.push_str(&format!("PersistentKeepalive = {keepalive}\n"));
+        }
+        s
+    }
+}
+
 /// Protocol-agnostic VPN configuration.
 ///
 /// Each variant wraps a protocol-specific config. Common VPN concepts
@@ -405,6 +593,10 @@ impl VlessVpnConfig {
 pub enum ProtocolConfig {
     #[serde(rename = "wireguard")]
     WireGuard(WgConfig),
+    /// AmneziaWG — WireGuard + obfuscation. Runs through the same gotatun tunnel path.
+    #[serde(rename = "amneziawg")]
+    #[specta(skip)]
+    AmneziaWg(AwgConfig),
     #[serde(rename = "vless")]
     #[specta(skip)]
     Vless(VlessVpnConfig),
@@ -415,6 +607,7 @@ impl ProtocolConfig {
     pub fn endpoint_str(&self) -> &str {
         match self {
             Self::WireGuard(wg) => &wg.peer_endpoint,
+            Self::AmneziaWg(awg) => &awg.wg.peer_endpoint,
             Self::Vless(vless) => &vless.server_addr,
         }
     }
@@ -423,6 +616,7 @@ impl ProtocolConfig {
     pub fn address(&self) -> &str {
         match self {
             Self::WireGuard(wg) => &wg.address,
+            Self::AmneziaWg(awg) => &awg.wg.address,
             Self::Vless(vless) => &vless.address,
         }
     }
@@ -431,6 +625,7 @@ impl ProtocolConfig {
     pub fn address_network(&self) -> Result<IpNetwork, String> {
         match self {
             Self::WireGuard(wg) => wg.address_network(),
+            Self::AmneziaWg(awg) => awg.wg.address_network(),
             Self::Vless(vless) => vless.address_network(),
         }
     }
@@ -439,6 +634,7 @@ impl ProtocolConfig {
     pub fn dns_servers(&self) -> Vec<IpAddr> {
         match self {
             Self::WireGuard(wg) => wg.dns_servers(),
+            Self::AmneziaWg(awg) => awg.wg.dns_servers(),
             Self::Vless(vless) => vless.dns_servers(),
         }
     }
@@ -447,6 +643,7 @@ impl ProtocolConfig {
     pub fn allowed_ips_networks(&self) -> Vec<IpNetwork> {
         match self {
             Self::WireGuard(wg) => wg.allowed_ips_networks(),
+            Self::AmneziaWg(awg) => awg.wg.allowed_ips_networks(),
             Self::Vless(vless) => vless.allowed_ips_networks(),
         }
     }
@@ -455,6 +652,7 @@ impl ProtocolConfig {
     pub fn get_mtu(&self) -> u16 {
         match self {
             Self::WireGuard(wg) => wg.get_mtu(),
+            Self::AmneziaWg(awg) => awg.wg.get_mtu(),
             Self::Vless(vless) => vless.get_mtu(),
         }
     }
@@ -463,18 +661,22 @@ impl ProtocolConfig {
     pub fn protocol_name(&self) -> &'static str {
         match self {
             Self::WireGuard(_) => "wireguard",
+            Self::AmneziaWg(_) => "amneziawg",
             Self::Vless(_) => "vless",
         }
     }
 }
 
-/// Dual-config storage: holds both WG and VLESS configs with an active protocol selector.
+/// Multi-config storage: holds WG, AmneziaWG, and VLESS configs with an active selector.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SavedVpnConfigs {
-    /// Currently active protocol: "wireguard" or "vless"
+    /// Currently active protocol: "amneziawg", "wireguard", or "vless"
     pub active_protocol: String,
     /// Cached WireGuard config (if any)
     pub wireguard: Option<WgConfig>,
+    /// Cached AmneziaWG config (if any)
+    #[serde(default)]
+    pub amneziawg: Option<AwgConfig>,
     /// Cached VLESS config (if any)
     #[serde(default)]
     pub vless: Option<VlessVpnConfig>,
@@ -484,14 +686,18 @@ impl SavedVpnConfigs {
     /// Get the active ProtocolConfig for the connect flow.
     pub fn active_config(&self) -> Option<ProtocolConfig> {
         match self.active_protocol.as_str() {
+            "amneziawg" => self.amneziawg.clone().map(ProtocolConfig::AmneziaWg),
             "vless" => self.vless.clone().map(ProtocolConfig::Vless),
             _ => self.wireguard.clone().map(ProtocolConfig::WireGuard),
         }
     }
 
-    /// Which protocols have cached configs (VLESS first as default).
+    /// Which protocols have cached configs. AmneziaWG is listed first — it is the default.
     pub fn available_protocols(&self) -> Vec<String> {
         let mut protocols = Vec::new();
+        if self.amneziawg.is_some() {
+            protocols.push("amneziawg".to_string());
+        }
         if self.vless.is_some() {
             protocols.push("vless".to_string());
         }
@@ -503,7 +709,7 @@ impl SavedVpnConfigs {
 
     /// Whether any config is stored.
     pub fn has_any(&self) -> bool {
-        self.wireguard.is_some() || self.vless.is_some()
+        self.wireguard.is_some() || self.amneziawg.is_some() || self.vless.is_some()
     }
 }
 

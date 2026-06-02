@@ -2,6 +2,30 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
+/// VPN tunnel protocol. WireGuard and AmneziaWG share the peers table (keypair + IP);
+/// AmneziaWG adds interface-wide obfuscation and runs on its own server interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[serde(rename_all = "lowercase")]
+pub enum Protocol {
+    #[sqlx(rename = "wireguard")]
+    WireGuard,
+    /// Default protocol for new peers (DPI-resistant).
+    #[default]
+    #[sqlx(rename = "amneziawg")]
+    AmneziaWg,
+}
+
+impl Protocol {
+    /// Database/config string form ("wireguard" | "amneziawg").
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Protocol::WireGuard => "wireguard",
+            Protocol::AmneziaWg => "amneziawg",
+        }
+    }
+}
+
 /// Peer synchronization status with WireGuard interface
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
@@ -41,6 +65,9 @@ pub struct Peer {
     /// Assigned IP within VPN subnet, e.g. "10.100.0.5"
     pub assigned_ip: String,
     pub sync_status: PeerSyncStatus,
+    /// Tunnel protocol (wireguard or amneziawg)
+    #[serde(default)]
+    pub protocol: Protocol,
     pub created_at: DateTime<Utc>,
     /// Last WireGuard handshake time (updated by daemon)
     pub last_handshake: Option<DateTime<Utc>>,

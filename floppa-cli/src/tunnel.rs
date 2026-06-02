@@ -13,16 +13,40 @@ pub const DEFAULT_INTERFACE_NAME: &str = "floppa0";
 
 pub type FloppaDevice = Device<(UdpSocketFactory, TunDevice, TunDevice)>;
 
-/// Parsed WireGuard config.
+/// AmneziaWG 2.0 obfuscation params parsed from an AmneziaWG `.conf` `[Interface]`.
+#[derive(Default)]
+pub struct AwgObfuscation {
+    pub jc: u32,
+    pub jmin: u32,
+    pub jmax: u32,
+    pub s1: u32,
+    pub s2: u32,
+    pub s3: u32,
+    pub s4: u32,
+    pub h1: String,
+    pub h2: String,
+    pub h3: String,
+    pub h4: String,
+    pub i1: Option<String>,
+    pub i2: Option<String>,
+    pub i3: Option<String>,
+    pub i4: Option<String>,
+    pub i5: Option<String>,
+}
+
+/// Parsed WireGuard config. When `obfuscation` is set, it's an AmneziaWG config (same tunnel
+/// path, with interface-wide obfuscation applied to the gotatun device).
 pub struct WgConfig {
     pub private_key: String,
     pub address: String,
     pub dns: Option<String>,
+    pub mtu: Option<u16>,
     pub peer_public_key: String,
     pub peer_preshared_key: Option<String>,
     pub peer_endpoint: String,
     pub allowed_ips: String,
     pub persistent_keepalive: Option<u16>,
+    pub obfuscation: Option<AwgObfuscation>,
 }
 
 impl WgConfig {
@@ -30,11 +54,15 @@ impl WgConfig {
         let mut private_key = None;
         let mut address = None;
         let mut dns = None;
+        let mut mtu = None;
         let mut peer_public_key = None;
         let mut peer_preshared_key = None;
         let mut peer_endpoint = None;
         let mut allowed_ips = None;
         let mut persistent_keepalive = None;
+
+        let mut obf = AwgObfuscation::default();
+        let mut has_awg = false;
 
         let mut in_interface = false;
         let mut in_peer = false;
@@ -62,6 +90,72 @@ impl WgConfig {
                         "privatekey" => private_key = Some(value),
                         "address" => address = Some(value),
                         "dns" => dns = Some(value),
+                        "mtu" => mtu = value.parse().ok(),
+                        // AmneziaWG obfuscation params
+                        "jc" => {
+                            obf.jc = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "jmin" => {
+                            obf.jmin = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "jmax" => {
+                            obf.jmax = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "s1" => {
+                            obf.s1 = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "s2" => {
+                            obf.s2 = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "s3" => {
+                            obf.s3 = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "s4" => {
+                            obf.s4 = value.parse().unwrap_or(0);
+                            has_awg = true;
+                        }
+                        "h1" => {
+                            obf.h1 = value;
+                            has_awg = true;
+                        }
+                        "h2" => {
+                            obf.h2 = value;
+                            has_awg = true;
+                        }
+                        "h3" => {
+                            obf.h3 = value;
+                            has_awg = true;
+                        }
+                        "h4" => {
+                            obf.h4 = value;
+                            has_awg = true;
+                        }
+                        "i1" => {
+                            obf.i1 = (!value.is_empty()).then_some(value);
+                            has_awg = true;
+                        }
+                        "i2" => {
+                            obf.i2 = (!value.is_empty()).then_some(value);
+                            has_awg = true;
+                        }
+                        "i3" => {
+                            obf.i3 = (!value.is_empty()).then_some(value);
+                            has_awg = true;
+                        }
+                        "i4" => {
+                            obf.i4 = (!value.is_empty()).then_some(value);
+                            has_awg = true;
+                        }
+                        "i5" => {
+                            obf.i5 = (!value.is_empty()).then_some(value);
+                            has_awg = true;
+                        }
                         _ => {}
                     }
                 } else if in_peer {
@@ -77,16 +171,39 @@ impl WgConfig {
             }
         }
 
+        // AmneziaWG headers default to standard WireGuard (1..4) when only some are present.
+        if has_awg {
+            if obf.h1.is_empty() {
+                obf.h1 = "1".into();
+            }
+            if obf.h2.is_empty() {
+                obf.h2 = "2".into();
+            }
+            if obf.h3.is_empty() {
+                obf.h3 = "3".into();
+            }
+            if obf.h4.is_empty() {
+                obf.h4 = "4".into();
+            }
+        }
+
         Ok(Self {
             private_key: private_key.ok_or_else(|| anyhow!("Missing PrivateKey"))?,
             address: address.ok_or_else(|| anyhow!("Missing Address"))?,
             dns,
+            mtu,
             peer_public_key: peer_public_key.ok_or_else(|| anyhow!("Missing Peer PublicKey"))?,
             peer_preshared_key,
             peer_endpoint: peer_endpoint.ok_or_else(|| anyhow!("Missing Peer Endpoint"))?,
             allowed_ips: allowed_ips.unwrap_or_else(|| "0.0.0.0/0, ::/0".to_string()),
             persistent_keepalive,
+            obfuscation: has_awg.then_some(obf),
         })
+    }
+
+    /// MTU to use for the TUN device (AmneziaWG configs ship a lower MTU; default 1420).
+    pub fn mtu(&self) -> u16 {
+        self.mtu.unwrap_or(1420)
     }
 
     fn private_key_bytes(&self) -> Result<[u8; 32]> {
@@ -142,6 +259,44 @@ impl WgConfig {
     }
 }
 
+/// Build a gotatun `AwgConfig` from parsed obfuscation params.
+#[allow(clippy::field_reassign_with_default)]
+fn build_gotatun_awg(obf: &AwgObfuscation) -> Result<gotatun::noise::awg::AwgConfig> {
+    use gotatun::noise::awg::{AwgConfig as GotaAwg, MagicHeader, ObfChain};
+
+    let parse_h =
+        |s: &str| MagicHeader::parse(s).map_err(|e| anyhow!("Invalid AWG header '{s}': {e}"));
+    let parse_i = |o: &Option<String>| -> Result<Option<ObfChain>> {
+        match o {
+            Some(spec) => ObfChain::parse(spec)
+                .map(Some)
+                .map_err(|e| anyhow!("Invalid AWG signature packet '{spec}': {e}")),
+            None => Ok(None),
+        }
+    };
+
+    let mut a = GotaAwg::default();
+    a.jc = obf.jc as usize;
+    a.jmin = obf.jmin as usize;
+    a.jmax = obf.jmax as usize;
+    a.s1 = obf.s1 as usize;
+    a.s2 = obf.s2 as usize;
+    a.s3 = obf.s3 as usize;
+    a.s4 = obf.s4 as usize;
+    a.h1 = parse_h(&obf.h1)?;
+    a.h2 = parse_h(&obf.h2)?;
+    a.h3 = parse_h(&obf.h3)?;
+    a.h4 = parse_h(&obf.h4)?;
+    a.i_packets = [
+        parse_i(&obf.i1)?,
+        parse_i(&obf.i2)?,
+        parse_i(&obf.i3)?,
+        parse_i(&obf.i4)?,
+        parse_i(&obf.i5)?,
+    ];
+    Ok(a)
+}
+
 fn run_ip(args: &[&str]) -> Result<()> {
     let output = Command::new("ip").args(args).output()?;
     if output.status.success() {
@@ -168,7 +323,7 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
     let addr = config.address_network()?;
 
     run_ip(&["addr", "add", &addr.to_string(), "dev", interface])?;
-    run_ip(&["link", "set", interface, "mtu", "1420"])?;
+    run_ip(&["link", "set", interface, "mtu", &config.mtu().to_string()])?;
     run_ip(&["link", "set", interface, "up"])?;
 
     // Add host route for WG endpoint via default gateway to prevent routing loop
@@ -209,7 +364,7 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let allowed_ips = config.allowed_ips_networks();
 
     let mut tun_config = tun::Configuration::default();
-    tun_config.tun_name(interface).mtu(1420);
+    tun_config.tun_name(interface).mtu(config.mtu());
     let tun_device = tun::create_as_async(&tun_config)?;
     let gota_tun = TunDevice::from_tun_device(tun_device)?;
 
@@ -224,13 +379,18 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
         peer = peer.with_preshared_key(psk);
     }
 
-    let device = DeviceBuilder::new()
+    let mut builder = DeviceBuilder::new()
         .with_default_udp()
         .with_ip(gota_tun)
         .with_private_key(x25519::StaticSecret::from(private_key))
-        .with_peer(peer)
-        .build()
-        .await?;
+        .with_peer(peer);
+
+    // AmneziaWG: apply interface-wide obfuscation. Absent → plain WireGuard.
+    if let Some(obf) = &config.obfuscation {
+        builder = builder.with_awg(build_gotatun_awg(obf)?);
+    }
+
+    let device = builder.build().await?;
 
     Ok(device)
 }

@@ -30,6 +30,8 @@ pub struct AppState {
     pub config: Config,
     pub secrets: Secrets,
     pub wg_public_key: String,
+    /// AmneziaWG server public key (None if AmneziaWG is not configured).
+    pub awg_public_key: Option<String>,
     pub bot: Bot,
     pub http_client: reqwest::Client,
     pub vm_url: String,
@@ -185,11 +187,15 @@ pub fn create_router(
         .map(|m| m.victoria_metrics_url.clone())
         .unwrap_or_else(|| "http://127.0.0.1:8428".to_string());
 
+    // Derived from secrets.awg_private_key; None when AmneziaWG isn't configured.
+    let awg_public_key = secrets.awg_public_key().ok();
+
     let state = AppState {
         pool,
         config,
         secrets,
         wg_public_key,
+        awg_public_key,
         bot,
         http_client: reqwest::Client::new(),
         vm_url,
@@ -262,6 +268,10 @@ async fn get_version() -> Json<VersionInfo> {
 #[derive(Serialize, ToSchema)]
 struct PublicConfig {
     telegram_bot_username: Option<String>,
+    /// Whether AmneziaWG is offered by this server (the client defaults to it when available).
+    amneziawg_available: bool,
+    /// Whether VLESS+REALITY is offered by this server.
+    vless_available: bool,
 }
 
 /// Get public configuration
@@ -276,5 +286,7 @@ struct PublicConfig {
 async fn get_public_config(State(state): State<AppState>) -> Json<PublicConfig> {
     Json(PublicConfig {
         telegram_bot_username: state.config.bot.as_ref().and_then(|b| b.username.clone()),
+        amneziawg_available: state.config.amneziawg.is_some() && state.awg_public_key.is_some(),
+        vless_available: state.config.vless.is_some() && state.secrets.vless.is_some(),
     })
 }

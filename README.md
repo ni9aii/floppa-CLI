@@ -10,15 +10,17 @@
 
 ## Architecture
 
-Two tunnel protocols, two VPS regions:
+Three tunnel protocols, two VPS regions:
 
-- **WireGuard** — client connects to Moscow VPS (:51820), traffic routes to Europe VPS via a site-to-site WireGuard tunnel (policy routing + MASQUERADE)
+- **AmneziaWG** — the default protocol. WireGuard plus DPI-resistant obfuscation; client connects to Moscow VPS (:51821), traffic routes to Europe VPS via a site-to-site WireGuard tunnel (policy routing + MASQUERADE)
+- **WireGuard** — plain WireGuard; client connects to Moscow VPS (:51820), same site-to-site routing to Europe
 - **VLESS+REALITY** — client connects directly to Europe VPS (:443), camouflaged as regular HTTPS
 
 ```mermaid
 graph TD
     Client["<b>Client Apps</b><br/>Tauri 2 — Linux, Windows, Android"]
 
+    Client -- "AmneziaWG :51821" --> Daemon
     Client -- "WireGuard :51820" --> Daemon
     Client -- "VLESS+REALITY :443" --> Vless
     Client -- "HTTPS" --> Nginx
@@ -34,7 +36,7 @@ graph TD
         DB[("<b>PostgreSQL</b><br/>Source of truth")]
         DB <-- "pg LISTEN / NOTIFY" --> Daemon
 
-        Daemon["<b>floppa-daemon</b><br/>WireGuard sync · tc HFSC rate limits"]
+        Daemon["<b>floppa-daemon</b><br/>WireGuard + AmneziaWG sync · tc HFSC rate limits"]
         Daemon -- "scrape :9101" --> VM
 
         VM[("<b>VictoriaMetrics</b><br/>Traffic metrics")]
@@ -49,12 +51,12 @@ graph TD
     Daemon -- "site-to-site WG tunnel" --> Europe
 ```
 
-**How it works:** Server writes peer changes to PostgreSQL (e.g. `sync_status = 'pending_add'`) → DB trigger fires `pg_notify('peer_changed')` → daemon picks it up, syncs WireGuard, applies rate limits, and marks peer as `active`. The VLESS proxy on Europe syncs its user registry from the same database via `pg LISTEN/NOTIFY`. All state lives in the database. Traffic metrics from both daemon and VLESS are scraped by VictoriaMetrics; the server queries VM to serve traffic stats in the API.
+**How it works:** Server writes peer changes to PostgreSQL (e.g. `sync_status = 'pending_add'`) → DB trigger fires `pg_notify('peer_changed')` → daemon picks it up, syncs the peer to its protocol's interface (WireGuard via `wg`, AmneziaWG via `awg` — each peer carries a `protocol`), applies rate limits, and marks peer as `active`. The VLESS proxy on Europe syncs its user registry from the same database via `pg LISTEN/NOTIFY`. All state lives in the database. Traffic metrics from both daemon and VLESS are scraped by VictoriaMetrics; the server queries VM to serve traffic stats in the API.
 
 ## Features
 
 ### Daemon
-- Stateless WireGuard peer synchronization via `wg set`
+- Stateless WireGuard + AmneziaWG peer synchronization via `wg set` / `awg set` (one interface per protocol; AmneziaWG adds DPI-resistant obfuscation)
 - Per-peer HFSC traffic shaping (bidirectional — egress + IFB ingress)
 - Prometheus metrics endpoint — traffic counters scraped by VictoriaMetrics
 - Auto-runs database migrations on startup
@@ -78,12 +80,12 @@ graph TD
 - Peer monitoring — sync status, traffic, last handshake
 
 ### CLI Client
-- Standalone WireGuard client (`floppa-cli`) for headless/server use
+- Standalone WireGuard / AmneziaWG / VLESS client (`floppa-cli`) for headless/server use (`--protocol`)
 - Also used as the tunnel binary for integration tests
 
 ### Client App (Tauri 2)
 - Cross-platform: Linux, Windows, Android
-- WireGuard and VLESS+REALITY tunnel support
+- AmneziaWG (default), WireGuard, and VLESS+REALITY tunnel support
 - Split tunneling with per-app selection (Android)
 - WireGuard config persistence via OS keyring (desktop) or encrypted file (Android)
 - Deep-link authentication (Telegram Login Widget → JWT)
@@ -189,10 +191,10 @@ graph TD
 | Layer | Tech |
 |-------|------|
 | Server | Rust, Axum, teloxide, sqlx, utoipa (OpenAPI), memory-serve |
-| Daemon | Rust, WireGuard (`wg`), Linux tc HFSC, Prometheus metrics |
+| Daemon | Rust, WireGuard (`wg`) + AmneziaWG (`awg`, kernel DKMS module), Linux tc HFSC, Prometheus metrics |
 | VLESS Proxy | Rust, [shoes-lite](https://github.com/okhsunrog/shoes-lite) (VLESS+REALITY+Vision), Prometheus metrics |
 | Frontend | Vue 3, Nuxt UI v4, Pinia Colada, Tailwind v4 |
-| Client | Tauri 2, gotatun (Mullvad WireGuard), shoes-lite (VLESS), tauri-specta, custom tauri-plugin-vpn |
+| Client | Tauri 2, gotatun (Mullvad WireGuard + AmneziaWG obfuscation), shoes-lite (VLESS), tauri-specta, custom tauri-plugin-vpn |
 | Database | PostgreSQL with LISTEN/NOTIFY |
 | Metrics | VictoriaMetrics (Prometheus-compatible TSDB) |
 | Crypto | x25519-dalek (WG keys), ChaCha20-Poly1305 (storage), XTLS REALITY, JWT |

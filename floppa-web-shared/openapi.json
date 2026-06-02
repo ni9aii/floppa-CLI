@@ -805,7 +805,7 @@
         "tags": [
           "user"
         ],
-        "summary": "Get a peer by device_id for the current user",
+        "summary": "Get a peer by device_id (+ protocol) for the current user",
         "operationId": "get_my_peer_by_device",
         "parameters": [
           {
@@ -813,6 +813,15 @@
             "in": "path",
             "description": "Device UUID",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "protocol",
+            "in": "query",
+            "description": "Tunnel protocol (wireguard|amneziawg)",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -2312,6 +2321,13 @@
               "null"
             ],
             "format": "int64"
+          },
+          "protocol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Tunnel protocol: \"wireguard\" or \"amneziawg\". Defaults to \"wireguard\"."
           }
         }
       },
@@ -2672,6 +2688,7 @@
           "id",
           "assigned_ip",
           "sync_status",
+          "protocol",
           "download_bytes",
           "upload_bytes",
           "created_at"
@@ -2710,6 +2727,10 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "protocol": {
+            "type": "string",
+            "description": "Tunnel protocol: \"wireguard\" or \"amneziawg\"."
           },
           "sync_status": {
             "type": "string"
@@ -2860,6 +2881,7 @@
           "user_id",
           "assigned_ip",
           "sync_status",
+          "protocol",
           "download_bytes",
           "upload_bytes",
           "has_vless"
@@ -2909,6 +2931,10 @@
               "string",
               "null"
             ]
+          },
+          "protocol": {
+            "type": "string",
+            "description": "Tunnel protocol: \"wireguard\" or \"amneziawg\"."
           },
           "sync_status": {
             "type": "string"
@@ -2988,12 +3014,24 @@
       },
       "PublicConfig": {
         "type": "object",
+        "required": [
+          "amneziawg_available",
+          "vless_available"
+        ],
         "properties": {
+          "amneziawg_available": {
+            "type": "boolean",
+            "description": "Whether AmneziaWG is offered by this server (the client defaults to it when available)."
+          },
           "telegram_bot_username": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "vless_available": {
+            "type": "boolean",
+            "description": "Whether VLESS+REALITY is offered by this server."
           }
         }
       },

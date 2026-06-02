@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT p.id, p.assigned_ip, p.sync_status, p.last_handshake, p.created_at,\n               ai.device_name, ai.device_id\n        FROM peers p\n        JOIN app_installations ai ON p.installation_id = ai.id\n        WHERE p.user_id = $1 AND ai.device_id = $2 AND p.sync_status NOT IN ('removed', 'pending_remove')\n        ",
+  "query": "\n        SELECT p.id, p.assigned_ip, p.sync_status, p.protocol, p.last_handshake, p.created_at,\n               ai.device_name, ai.device_id AS \"device_id?\"\n        FROM peers p\n        LEFT JOIN app_installations ai ON p.installation_id = ai.id\n        WHERE p.user_id = $1 AND p.sync_status != 'removed'\n        ORDER BY p.created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -20,32 +20,37 @@
       },
       {
         "ordinal": 3,
+        "name": "protocol",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "last_handshake",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "device_name",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
-        "name": "device_id",
+        "ordinal": 7,
+        "name": "device_id?",
         "type_info": "Text"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -55,5 +60,5 @@
       false
     ]
   },
-  "hash": "2048e1c10c9f26eee7f20a831867a8ebffff5040cacab10cfd98e67ddb1e8841"
+  "hash": "682d6c37332882c4986d6625ba4db6f8581bd8834703a0a85247d592335c21f5"
 }
