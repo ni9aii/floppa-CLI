@@ -42,13 +42,13 @@ export const useAuthStore = defineStore('auth', () => {
   const isAdmin = computed(() => user.value?.is_admin ?? false)
 
   /// Fetch the current user's avatar from the server (Bearer-authed) and cache it as a data URL.
-  /// The server caches it asynchronously on login, so on a fresh login it may 404 briefly — retry
-  /// a couple of times before giving up.
-  function cacheAvatar(retries = 3) {
+  /// The first request triggers a background download from Telegram (getUserProfilePhotos →
+  /// getFile → download), which can take ~10s, so retry generously (≈24s window) before giving up.
+  function cacheAvatar(retries = 8) {
     getMyAvatar({ parseAs: 'blob' })
       .then(({ data, response }) => {
         if (response.status === 404) {
-          if (retries > 0) setTimeout(() => cacheAvatar(retries - 1), 4000)
+          if (retries > 0) setTimeout(() => cacheAvatar(retries - 1), 3000)
           return
         }
         if (!response.ok || !(data instanceof Blob)) return
