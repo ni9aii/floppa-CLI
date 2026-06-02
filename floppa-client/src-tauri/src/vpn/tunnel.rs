@@ -188,7 +188,7 @@ impl GotatunTunnel {
 
         // Build the device with all configuration
         let mut builder = DeviceBuilder::new()
-            .with_udp(UdpSocketFactory)
+            .with_udp(UdpSocketFactory::default())
             .with_ip(gota_tun)
             .with_private_key(x25519::StaticSecret::from(private_key))
             .with_peer(peer);
