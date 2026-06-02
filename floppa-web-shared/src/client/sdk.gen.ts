@@ -2,7 +2,7 @@
 
 import type { Client, Options as Options2, TDataShape } from './client';
 import { client } from './client.gen';
-import type { CreateMyPeerData, CreateMyPeerErrors, CreateMyPeerResponses, CreatePlanData, CreatePlanErrors, CreatePlanResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteAdminPeerData, DeleteAdminPeerErrors, DeleteAdminPeerResponses, DeleteInstallationData, DeleteInstallationErrors, DeleteInstallationResponses, DeleteMyPeerData, DeleteMyPeerErrors, DeleteMyPeerResponses, DeletePlanData, DeletePlanErrors, DeletePlanResponses, DeleteSubscriptionData, DeleteSubscriptionErrors, DeleteSubscriptionResponses, ExchangeTelegramLoginCodeData, ExchangeTelegramLoginCodeErrors, ExchangeTelegramLoginCodeResponses, GetMeData, GetMeErrors, GetMeResponses, GetMyPeerByDeviceData, GetMyPeerByDeviceErrors, GetMyPeerByDeviceResponses, GetMyPeerConfigData, GetMyPeerConfigErrors, GetMyPeerConfigResponses, GetMyPeersData, GetMyPeersErrors, GetMyPeersResponses, GetMyVlessConfigData, GetMyVlessConfigErrors, GetMyVlessConfigResponses, GetPublicConfigData, GetPublicConfigResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetUserData, GetUserErrors, GetUserResponses, GetVersionData, GetVersionResponses, ListInstallationsData, ListInstallationsErrors, ListInstallationsResponses, ListPeersData, ListPeersErrors, ListPeersResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListUsersData, ListUsersErrors, ListUsersResponses, ListVlessPeersData, ListVlessPeersErrors, ListVlessPeersResponses, LoginAccountData, LoginAccountErrors, LoginAccountResponses, PollTelegramLinkData, PollTelegramLinkErrors, PollTelegramLinkResponses, RegenerateAdminVlessConfigData, RegenerateAdminVlessConfigErrors, RegenerateAdminVlessConfigResponses, RegenerateMyVlessConfigData, RegenerateMyVlessConfigErrors, RegenerateMyVlessConfigResponses, RegisterAccountData, RegisterAccountErrors, RegisterAccountResponses, RemovePeerData, RemovePeerErrors, RemovePeerResponses, SendMyPeerConfigData, SendMyPeerConfigErrors, SendMyPeerConfigResponses, SetMyCredentialData, SetMyCredentialErrors, SetMyCredentialResponses, SetSubscriptionData, SetSubscriptionErrors, SetSubscriptionResponses, SetUserCredentialData, SetUserCredentialErrors, SetUserCredentialResponses, StartTelegramDeepLinkLoginData, StartTelegramDeepLinkLoginErrors, StartTelegramDeepLinkLoginResponses, StartTelegramLinkData, StartTelegramLinkErrors, StartTelegramLinkResponses, TelegramDeepLinkCallbackData, TelegramDeepLinkCallbackErrors, TelegramDeepLinkCallbackResponses, TelegramLoginData, TelegramLoginErrors, TelegramLoginResponses, TelegramMiniAppAuthData, TelegramMiniAppAuthErrors, TelegramMiniAppAuthResponses, UpdatePlanData, UpdatePlanErrors, UpdatePlanResponses, UpsertMyInstallationData, UpsertMyInstallationErrors, UpsertMyInstallationResponses } from './types.gen';
+import type { CreateMyPeerData, CreateMyPeerErrors, CreateMyPeerResponses, CreatePlanData, CreatePlanErrors, CreatePlanResponses, CreateUserData, CreateUserErrors, CreateUserResponses, DeleteAdminPeerData, DeleteAdminPeerErrors, DeleteAdminPeerResponses, DeleteInstallationData, DeleteInstallationErrors, DeleteInstallationResponses, DeleteMyPeerData, DeleteMyPeerErrors, DeleteMyPeerResponses, DeletePlanData, DeletePlanErrors, DeletePlanResponses, DeleteSubscriptionData, DeleteSubscriptionErrors, DeleteSubscriptionResponses, ExchangeTelegramLoginCodeData, ExchangeTelegramLoginCodeErrors, ExchangeTelegramLoginCodeResponses, GetAvatarsBatchData, GetAvatarsBatchErrors, GetAvatarsBatchResponses, GetMeData, GetMeErrors, GetMeResponses, GetMyAvatarData, GetMyAvatarErrors, GetMyAvatarResponses, GetMyPeerByDeviceData, GetMyPeerByDeviceErrors, GetMyPeerByDeviceResponses, GetMyPeerConfigData, GetMyPeerConfigErrors, GetMyPeerConfigResponses, GetMyPeersData, GetMyPeersErrors, GetMyPeersResponses, GetMyVlessConfigData, GetMyVlessConfigErrors, GetMyVlessConfigResponses, GetPublicConfigData, GetPublicConfigResponses, GetStatsData, GetStatsErrors, GetStatsResponses, GetUserAvatarData, GetUserAvatarErrors, GetUserAvatarResponses, GetUserData, GetUserErrors, GetUserResponses, GetVersionData, GetVersionResponses, ListInstallationsData, ListInstallationsErrors, ListInstallationsResponses, ListPeersData, ListPeersErrors, ListPeersResponses, ListPlansData, ListPlansErrors, ListPlansResponses, ListUsersData, ListUsersErrors, ListUsersResponses, ListVlessPeersData, ListVlessPeersErrors, ListVlessPeersResponses, LoginAccountData, LoginAccountErrors, LoginAccountResponses, PollTelegramLinkData, PollTelegramLinkErrors, PollTelegramLinkResponses, RegenerateAdminVlessConfigData, RegenerateAdminVlessConfigErrors, RegenerateAdminVlessConfigResponses, RegenerateMyVlessConfigData, RegenerateMyVlessConfigErrors, RegenerateMyVlessConfigResponses, RegisterAccountData, RegisterAccountErrors, RegisterAccountResponses, RemovePeerData, RemovePeerErrors, RemovePeerResponses, SendMyPeerConfigData, SendMyPeerConfigErrors, SendMyPeerConfigResponses, SetMyCredentialData, SetMyCredentialErrors, SetMyCredentialResponses, SetSubscriptionData, SetSubscriptionErrors, SetSubscriptionResponses, SetUserCredentialData, SetUserCredentialErrors, SetUserCredentialResponses, StartTelegramDeepLinkLoginData, StartTelegramDeepLinkLoginErrors, StartTelegramDeepLinkLoginResponses, StartTelegramLinkData, StartTelegramLinkErrors, StartTelegramLinkResponses, TelegramDeepLinkCallbackData, TelegramDeepLinkCallbackErrors, TelegramDeepLinkCallbackResponses, TelegramLoginData, TelegramLoginErrors, TelegramLoginResponses, TelegramMiniAppAuthData, TelegramMiniAppAuthErrors, TelegramMiniAppAuthResponses, UpdatePlanData, UpdatePlanErrors, UpdatePlanResponses, UpsertMyInstallationData, UpsertMyInstallationErrors, UpsertMyInstallationResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -17,6 +17,24 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
      */
     meta?: Record<string, unknown>;
 };
+
+/**
+ * Batch-fetch cached avatars as data URLs (admin). Returns only users that have a cached avatar,
+ * keyed by user id (string). Avoids one request per row in the admin user list.
+ */
+export const getAvatarsBatch = <ThrowOnError extends boolean = false>(options: Options<GetAvatarsBatchData, ThrowOnError>) => (options.client ?? client).post<GetAvatarsBatchResponses, GetAvatarsBatchErrors, ThrowOnError>({
+    url: '/admin/avatars',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get a user's cached avatar (admin).
+ */
+export const getUserAvatar = <ThrowOnError extends boolean = false>(options: Options<GetUserAvatarData, ThrowOnError>) => (options.client ?? client).get<GetUserAvatarResponses, GetUserAvatarErrors, ThrowOnError>({ url: '/admin/users/{id}/avatar', ...options });
 
 /**
  * Log in with a login + password.
@@ -109,6 +127,11 @@ export const deleteInstallation = <ThrowOnError extends boolean = false>(options
  * Get current authenticated user info
  */
 export const getMe = <ThrowOnError extends boolean = false>(options?: Options<GetMeData, ThrowOnError>) => (options?.client ?? client).get<GetMeResponses, GetMeErrors, ThrowOnError>({ url: '/me', ...options });
+
+/**
+ * Get the current user's cached avatar.
+ */
+export const getMyAvatar = <ThrowOnError extends boolean = false>(options?: Options<GetMyAvatarData, ThrowOnError>) => (options?.client ?? client).get<GetMyAvatarResponses, GetMyAvatarErrors, ThrowOnError>({ url: '/me/avatar', ...options });
 
 /**
  * Set or change the login + password (backup access) for the current account.
