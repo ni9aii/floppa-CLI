@@ -252,10 +252,12 @@ package-vless: build-vless
     echo "Contents:"
     tar -tzvf floppa-vless-release.tar.gz
 
-# Deploy to Moscow VPS via Ansible (builds, packages, then deploys)
+# Deploy to Moscow VPS via Ansible (builds, packages, then deploys).
+# Includes the network role so AmneziaWG's firewall port, NAT and tunnel routing are applied.
 deploy: package
-    cd ../cloud-forge && ansible-playbook site-moscow.yml --tags floppa
+    cd ../cloud-forge && ansible-playbook site-moscow.yml --tags floppa,network
 
-# Deploy to Europe VPS via Ansible (builds, packages, then deploys)
+# Deploy to Europe VPS via Ansible (builds, packages, then deploys).
+# Includes the network role so the AmneziaWG subnet gets exit NAT (masquerade).
 deploy-europe: package-vless
-    cd ../cloud-forge && ansible-playbook site-europe.yml --tags floppa-vless
+    cd ../cloud-forge && ansible-playbook site-europe.yml --tags floppa-vless,network
