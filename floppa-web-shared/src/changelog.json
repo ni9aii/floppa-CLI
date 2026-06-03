@@ -32,6 +32,10 @@
         {
           "en": "Profile avatars now load reliably — served from our own servers, so they show even where Telegram's image CDN is blocked",
           "ru": "Аватарки профиля теперь загружаются стабильно — раздаются с наших серверов, поэтому видны даже там, где CDN картинок Telegram заблокирован"
+        },
+        {
+          "en": "Info tab — browse available plans, app downloads for every platform, the changelog, and links to our Telegram channel, bot and GitHub (also a public landing page on the website)",
+          "ru": "Вкладка «Информация» — тарифы, ссылки на скачивание для всех платформ, список изменений и ссылки на Telegram-канал, бота и GitHub (а на сайте — публичная страница-лендинг)"
         }
       ]
     },
@@ -58,6 +62,10 @@
         {
           "en": "Dropdown menus no longer render behind dialogs and modals",
           "ru": "Выпадающие меню больше не отображаются позади диалогов и модальных окон"
+        },
+        {
+          "en": "Android — preinstalled apps like YouTube now appear in the main app list for split tunneling, not only under \"system apps\"",
+          "ru": "Android — предустановленные приложения вроде YouTube теперь видны в основном списке приложений для раздельного туннелирования, а не только в «системных»"
         }
       ]
     }
