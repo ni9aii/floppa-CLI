@@ -16,8 +16,9 @@ import { formatBytes, formatDateTime, formatSpeedLimit, handleExternalLinkClick 
 import StatusBadge from '../../components/StatusBadge.vue'
 import type { PeerSyncStatus } from '../../types'
 
+const { t } = useI18n()
+
 function sourceLabel(source: string): string {
-  const { t } = useI18n()
   switch (source) {
     case 'trial':
       return t('adminUserDetail.sourceTrial')
@@ -49,7 +50,6 @@ function sourceColor(source: string): 'info' | 'success' | 'warning' | 'neutral'
 
 const route = useRoute()
 const router = useRouter()
-const { t } = useI18n()
 const toast = useToast()
 
 const userId = Number(route.params.id)

@@ -102,15 +102,11 @@ async function savePlan() {
         clear_price_stars: planForm.value.price_stars == null,
         clear_period_days: planForm.value.period_days == null,
       }
-      const updated = await updateMut.mutateAsync({
+      await updateMut.mutateAsync({
         path: { id: editingPlanId.value },
         body: update,
       })
-      // Optimistically patch local data so table updates instantly (even for null fields)
-      if (plans.value && updated) {
-        const idx = plans.value.findIndex((p) => p.id === editingPlanId.value)
-        if (idx !== -1) plans.value[idx] = updated
-      }
+      // refresh() below re-fetches the list, so no manual cache patch is needed.
       toast.add({
         title: t('common.success'),
         description: t('adminPlans.planUpdated'),

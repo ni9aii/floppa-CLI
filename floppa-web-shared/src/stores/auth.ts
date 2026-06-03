@@ -8,6 +8,25 @@ const USER_KEY = 'floppa-user'
 const AVATAR_KEY = 'floppa-avatar'
 const TELEGRAM_ID_KEY = 'floppa-telegram-id'
 
+/** The JWT `exp` claim (seconds since epoch), or null if absent/unreadable. */
+function jwtExp(jwt: string): number | null {
+  const payload = jwt.split('.')[1]
+  if (!payload) return null
+  try {
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
+    const exp = (JSON.parse(json) as { exp?: unknown }).exp
+    return typeof exp === 'number' ? exp : null
+  } catch {
+    return null
+  }
+}
+
+/** True only when the token carries an `exp` claim that is already in the past. */
+function isTokenExpired(jwt: string): boolean {
+  const exp = jwtExp(jwt)
+  return exp !== null && exp * 1000 <= Date.now()
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
   const user = ref<AuthUserInfo | null>(
@@ -38,7 +57,7 @@ export const useAuthStore = defineStore('auth', () => {
   // unreachable from clients in Russia, so it's not used as a fallback.
   const avatarUrl = computed(() => cachedAvatar.value ?? undefined)
 
-  const isAuthenticated = computed(() => !!token.value)
+  const isAuthenticated = computed(() => !!token.value && !isTokenExpired(token.value))
   const isAdmin = computed(() => user.value?.is_admin ?? false)
 
   /// Fetch the current user's avatar from the server (Bearer-authed) and cache it as a data URL.
@@ -84,6 +103,12 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(AVATAR_KEY)
     telegramId.value = null
     localStorage.removeItem(TELEGRAM_ID_KEY)
+  }
+
+  // Purge a token that expired since the last session, so the guard doesn't treat a
+  // stale token as authenticated (and flash authed UI) until the first 401.
+  if (token.value && isTokenExpired(token.value)) {
+    logout()
   }
 
   // Refresh the avatar from the server on startup when authenticated but not yet cached.
