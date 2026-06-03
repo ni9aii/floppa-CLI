@@ -293,6 +293,7 @@ export default {
     activeConfigs: 'Active Configs',
     totalTraffic: 'Total Traffic',
     manageConfigs: 'Manage Configs',
+    appAndPlans: 'Apps & plans',
     adminPanel: 'Admin Panel',
     tasterTitle: 'Trial access for 1 hour',
     tasterBody: 'Link Telegram to unlock the full 7-day trial.',

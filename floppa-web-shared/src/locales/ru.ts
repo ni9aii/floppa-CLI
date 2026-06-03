@@ -292,6 +292,7 @@ export default {
     activeConfigs: 'Активных конфигов',
     totalTraffic: 'Общий трафик',
     manageConfigs: 'Управление конфигами',
+    appAndPlans: 'Приложения и тарифы',
     adminPanel: 'Панель администратора',
     tasterTitle: 'Пробный доступ на 1 час',
     tasterBody: 'Привяжите Telegram, чтобы получить полный 7-дневный пробный период.',

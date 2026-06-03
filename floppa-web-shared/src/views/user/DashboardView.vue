@@ -182,6 +182,13 @@ const daysRemaining = computed(() => {
             @click="router.push('/peers')"
           />
           <UButton
+            :label="t('userDashboard.appAndPlans')"
+            icon="i-lucide-download"
+            color="primary"
+            variant="soft"
+            @click="router.push('/info')"
+          />
+          <UButton
             v-if="auth.isAdmin"
             :label="t('userDashboard.adminPanel')"
             icon="i-lucide-shield"
