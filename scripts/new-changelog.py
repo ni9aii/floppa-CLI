@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "floppa-client" / "src" / "changelog.json"
+CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "floppa-web-shared" / "src" / "changelog.json"
 
 STUB_SECTIONS = [
     {"type": "added", "items": [{"en": "TODO", "ru": "TODO"}]},

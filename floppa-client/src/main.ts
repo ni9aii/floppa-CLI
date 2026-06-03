@@ -20,6 +20,7 @@ import './styles.css'
 import App from './App.vue'
 import ClientLoginView from './views/ClientLoginView.vue'
 import ClientDashboardView from './views/ClientDashboardView.vue'
+import ClientInfoView from './views/ClientInfoView.vue'
 
 // Forward console.* to Tauri's plugin-log so all frontend logs
 // appear in tracing (logcat on Android, stdout on desktop).
@@ -118,6 +119,7 @@ const routes = createAppRoutes()
 const overrides: Record<string, () => Promise<unknown>> = {
   login: () => Promise.resolve(ClientLoginView),
   dashboard: () => Promise.resolve(ClientDashboardView),
+  info: () => Promise.resolve(ClientInfoView),
 }
 
 for (const route of routes) {

@@ -237,4 +237,4 @@ jobs:
             release-artifacts/**/*.exe
             release-artifacts/**/*.msi
             release-artifacts/**/*.pkg.tar.zst
-            floppa-client/src/changelog.json
+            floppa-web-shared/src/changelog.json

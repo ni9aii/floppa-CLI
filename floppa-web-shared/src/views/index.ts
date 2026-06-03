@@ -1,4 +1,5 @@
 export { default as LoginView } from './LoginView.vue'
+export { default as InfoView } from './InfoView.vue'
 export { default as UserDashboardView } from './user/DashboardView.vue'
 export { default as UserPeersView } from './user/PeersView.vue'
 export { default as AdminDashboardView } from './admin/DashboardView.vue'

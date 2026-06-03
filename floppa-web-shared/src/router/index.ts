@@ -9,9 +9,24 @@ export function createAppRoutes(): RouteRecordRaw[] {
       component: () => import('../views/LoginView.vue'),
     },
     {
+      // Public landing for logged-out visitors: description, plans, downloads, login CTA.
+      path: '/welcome',
+      name: 'welcome',
+      component: () => import('../views/InfoView.vue'),
+      props: { variant: 'landing' },
+    },
+    {
       path: '/',
       name: 'dashboard',
       component: () => import('../views/user/DashboardView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      // In-app Info tab for authenticated users (same content, no login CTA).
+      path: '/info',
+      name: 'info',
+      component: () => import('../views/InfoView.vue'),
+      props: { variant: 'tab' },
       meta: { requiresAuth: true },
     },
     {
@@ -86,7 +101,17 @@ function getTelegramUserIdFromInitData(): number | null {
   }
 }
 
-export function installAuthGuard(router: Router): void {
+export interface AuthGuardOptions {
+  /**
+   * Route name to send logged-out visitors to when they hit a protected route.
+   * The web uses 'welcome' (the public landing); the Tauri client uses 'login'.
+   */
+  unauthenticatedRedirect?: string
+}
+
+export function installAuthGuard(router: Router, options: AuthGuardOptions = {}): void {
+  const unauthenticatedRedirect = options.unauthenticatedRedirect ?? 'login'
+
   router.beforeEach((to) => {
     const auth = useAuthStore()
 
@@ -97,7 +122,7 @@ export function installAuthGuard(router: Router): void {
     }
 
     if (to.meta.requiresAuth && !auth.isAuthenticated) {
-      return { name: 'login' }
+      return { name: unauthenticatedRedirect }
     }
 
     if (to.meta.requiresAdmin && !auth.isAdmin) {

@@ -242,6 +242,20 @@ export type PublicConfig = {
     vless_available: boolean;
 };
 
+/**
+ * Public-facing view of a plan (no internal `name`/`is_public`). Served unauthenticated
+ * to the landing page and Info tab so users can see pricing without logging in.
+ */
+export type PublicPlan = {
+    default_speed_limit_mbps?: number | null;
+    display_name: string;
+    id: number;
+    max_peers: number;
+    period_days?: number | null;
+    price_stars?: number | null;
+    trial_days?: number | null;
+};
+
 export type SetCredentialRequest = {
     login: string;
     password: string;
@@ -1234,6 +1248,19 @@ export type CreatePlanResponses = {
 };
 
 export type CreatePlanResponse = CreatePlanResponses[keyof CreatePlanResponses];
+
+export type ListPublicPlansData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/plans/public';
+};
+
+export type ListPublicPlansResponses = {
+    200: Array<PublicPlan>;
+};
+
+export type ListPublicPlansResponse = ListPublicPlansResponses[keyof ListPublicPlansResponses];
 
 export type DeletePlanData = {
     body?: never;

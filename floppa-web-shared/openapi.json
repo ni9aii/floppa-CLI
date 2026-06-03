@@ -1525,6 +1525,30 @@
         ]
       }
     },
+    "/plans/public": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "List public plans (no auth) — only plans flagged `is_public`. Used by the landing page\nand the in-app Info tab to display tariffs.",
+        "operationId": "list_public_plans",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicPlan"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/plans/{id}": {
       "delete": {
         "tags": [
@@ -3201,6 +3225,56 @@
           "vless_available": {
             "type": "boolean",
             "description": "Whether VLESS+REALITY is offered by this server."
+          }
+        }
+      },
+      "PublicPlan": {
+        "type": "object",
+        "description": "Public-facing view of a plan (no internal `name`/`is_public`). Served unauthenticated\nto the landing page and Info tab so users can see pricing without logging in.",
+        "required": [
+          "id",
+          "display_name",
+          "max_peers"
+        ],
+        "properties": {
+          "default_speed_limit_mbps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "max_peers": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "period_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "price_stars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "trial_days": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           }
         }
       },

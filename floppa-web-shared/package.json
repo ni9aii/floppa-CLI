@@ -38,7 +38,8 @@
     "./types": "./src/types/index.ts",
     "./views": "./src/views/index.ts",
     "./views/*": "./src/views/*",
-    "./router": "./src/router/index.ts"
+    "./router": "./src/router/index.ts",
+    "./changelog.json": "./src/changelog.json"
   },
   "files": [
     "src"
