@@ -17,7 +17,7 @@ const isDark = useDark()
 watch(
   isDark,
   (dark) => {
-    commands.setStatusBarStyle(dark)
+    commands.setStatusBarStyle(dark).catch(() => {})
   },
   { immediate: true },
 )
@@ -27,7 +27,7 @@ watch(
   () => authStore.isAuthenticated,
   (authenticated, wasAuthenticated) => {
     if (wasAuthenticated && !authenticated) {
-      commands.disconnect()
+      commands.disconnect().catch(() => {})
     }
   },
 )
@@ -73,7 +73,7 @@ async function openDownload(url: string) {
     </div>
 
     <!-- Forced update overlay -->
-    <UModal v-model:open="forceUpdateOpen" :closeable="false" :dismissible="false">
+    <UModal v-model:open="forceUpdateOpen" :close="false" :dismissible="false">
       <template #content>
         <div class="p-6 text-center space-y-4">
           <UIcon name="i-lucide-alert-triangle" class="text-(--ui-warning) size-12 mx-auto" />

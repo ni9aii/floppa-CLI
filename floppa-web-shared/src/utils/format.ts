@@ -5,7 +5,8 @@ export function formatBytes(bytes: number, decimals = 2): string {
   if (bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  // Clamp so huge (>= 1 EB) or fractional (< 1 B) inputs never index out of `sizes` ("1 undefined").
+  const i = Math.min(Math.max(Math.floor(Math.log(bytes) / Math.log(k)), 0), sizes.length - 1)
   return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i]
 }
 
@@ -16,7 +17,11 @@ export function formatSpeed(bytesPerSecond: number, decimals = 1): string {
   if (bytesPerSecond === 0) return '0 B/s'
   const k = 1024
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-  const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k))
+  // Clamp so >= 1 TB/s (or fractional) inputs never index out of `sizes` ("… undefined").
+  const i = Math.min(
+    Math.max(Math.floor(Math.log(bytesPerSecond) / Math.log(k)), 0),
+    sizes.length - 1,
+  )
   return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i]
 }
 

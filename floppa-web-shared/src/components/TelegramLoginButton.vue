@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import type { TelegramAuthData } from '../client/types.gen'
 
 const props = defineProps<{
@@ -15,9 +15,10 @@ const emit = defineEmits<{
 
 const widgetRef = ref<HTMLDivElement>()
 
+// Telegram's widget script calls a global by name (`data-onauth`), so we register one.
+const callbackName = `onTelegramAuth_${Math.random().toString(36).slice(2)}`
+
 onMounted(() => {
-  // Create global callback
-  const callbackName = `onTelegramAuth_${Math.random().toString(36).slice(2)}`
   ;(window as unknown as Record<string, unknown>)[callbackName] = (user: TelegramAuthData) => {
     emit('auth', user)
   }
@@ -35,6 +36,11 @@ onMounted(() => {
   }
 
   widgetRef.value?.appendChild(script)
+})
+
+onUnmounted(() => {
+  // Drop the global so it doesn't leak across mounts.
+  delete (window as unknown as Record<string, unknown>)[callbackName]
 })
 </script>
 

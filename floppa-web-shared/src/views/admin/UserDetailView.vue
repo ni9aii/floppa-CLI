@@ -21,6 +21,8 @@ function sourceLabel(source: string): string {
   switch (source) {
     case 'trial':
       return t('adminUserDetail.sourceTrial')
+    case 'taster':
+      return t('adminUserDetail.sourceTaster')
     case 'purchase':
       return t('adminUserDetail.sourcePurchase')
     case 'admin_grant':
@@ -34,6 +36,8 @@ function sourceColor(source: string): 'info' | 'success' | 'warning' | 'neutral'
   switch (source) {
     case 'trial':
       return 'info'
+    case 'taster':
+      return 'neutral'
     case 'purchase':
       return 'success'
     case 'admin_grant':

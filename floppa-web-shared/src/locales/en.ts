@@ -275,6 +275,7 @@ export default {
     deviceId: 'Device ID: {id}',
     source: 'Source',
     sourceTrial: 'Trial',
+    sourceTaster: 'Taster',
     sourcePurchase: 'Purchase',
     sourceAdminGrant: 'Admin Grant',
   },
