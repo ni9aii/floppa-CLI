@@ -5,8 +5,8 @@ use teloxide::{
     dispatching::UpdateHandler,
     prelude::*,
     types::{
-        InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, ParseMode, PreCheckoutQuery,
-        SuccessfulPayment, WebAppInfo,
+        InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup, LabeledPrice,
+        ParseMode, PreCheckoutQuery, SuccessfulPayment, WebAppInfo,
     },
     utils::command::BotCommands,
 };
@@ -44,10 +44,16 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
     // PreCheckoutQuery must be handled as a top-level update kind (not a message)
     let pre_checkout_handler = Update::filter_pre_checkout_query().endpoint(handle_pre_checkout);
 
+    // Taps on the persistent reply keyboard arrive as plain text equal to a button label.
+    let menu_button_handler =
+        dptree::filter(|msg: Message| msg.text().and_then(i18n::match_menu_button).is_some())
+            .endpoint(handle_menu_button);
+
     // SuccessfulPayment comes as a message — must be before commands/fallback
     let message_handler = Update::filter_message()
         .branch(Message::filter_successful_payment().endpoint(handle_successful_payment))
         .branch(command_handler)
+        .branch(menu_button_handler)
         .endpoint(fallback);
 
     dptree::entry()
@@ -100,21 +106,49 @@ async fn start(
         text.push_str(msgs.trial_granted);
     }
 
-    // Build inline keyboard with Mini App button if web_app_url is configured
+    // Welcome message carries the persistent reply keyboard (quick actions).
+    bot.send_message(msg.chat.id, text)
+        .reply_markup(main_menu_keyboard(msgs))
+        .await?;
+
+    // Follow up with a prominent inline button that launches the Mini App, if configured.
+    // (The chat menu button next to the input — set at startup — also opens it.)
     let web_app_url = config.bot.as_ref().and_then(|b| b.web_app_url.as_deref());
     if let Some(url) = web_app_url {
         let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::web_app(
             msgs.open_app,
             WebAppInfo { url: url.parse()? },
         )]]);
-        bot.send_message(msg.chat.id, text)
+        bot.send_message(msg.chat.id, msgs.open_app_cta)
             .reply_markup(keyboard)
             .await?;
-    } else {
-        bot.send_message(msg.chat.id, text).await?;
     }
 
     Ok(())
+}
+
+/// Persistent bottom reply keyboard with the most-used actions. Taps come back as plain
+/// text equal to the button label and are routed in [`handle_menu_button`].
+fn main_menu_keyboard(msgs: &i18n::Messages) -> KeyboardMarkup {
+    KeyboardMarkup::new(vec![
+        vec![
+            KeyboardButton::new(msgs.btn_status),
+            KeyboardButton::new(msgs.btn_buy),
+        ],
+        vec![KeyboardButton::new(msgs.btn_lang)],
+    ])
+    .resize_keyboard()
+    .persistent()
+}
+
+/// Route a reply-keyboard tap to the matching command handler.
+async fn handle_menu_button(bot: Bot, msg: Message, pool: DbPool, config: Config) -> HandlerResult {
+    match msg.text().and_then(i18n::match_menu_button) {
+        Some(i18n::BotMenuAction::Status) => status(bot, msg, pool).await,
+        Some(i18n::BotMenuAction::Buy) => buy(bot, msg, pool, config).await,
+        Some(i18n::BotMenuAction::Lang) => lang(bot, msg, pool).await,
+        None => Ok(()),
+    }
 }
 
 /// Mark a link code consumed (idempotent). Returns true if this call consumed it.

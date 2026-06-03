@@ -5,7 +5,11 @@ use anyhow::Result;
 use axum::Router;
 use floppa_core::{Config, Secrets, db};
 use std::net::SocketAddr;
-use teloxide::{prelude::*, types::BotCommand, utils::command::BotCommands};
+use teloxide::{
+    prelude::*,
+    types::{BotCommand, MenuButton, WebAppInfo},
+    utils::command::BotCommands,
+};
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     trace::TraceLayer,
@@ -73,6 +77,18 @@ async fn main() -> Result<()> {
     .language_code("ru")
     .await?;
     info!("Bot commands registered");
+
+    // Point the chat menu button (next to the message input) at the Mini App, so the app
+    // is always one tap away instead of the default commands list.
+    if let Some(url) = config.bot.as_ref().and_then(|b| b.web_app_url.as_deref()) {
+        bot.set_chat_menu_button()
+            .menu_button(MenuButton::WebApp {
+                text: "Floppa VPN".to_string(),
+                web_app: WebAppInfo { url: url.parse()? },
+            })
+            .await?;
+        info!("Chat menu button set to Mini App");
+    }
 
     // Build Axum router
     let api_router = admin::routes::create_router(
