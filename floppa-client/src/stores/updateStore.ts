@@ -1,19 +1,20 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { platform, arch } from '@tauri-apps/plugin-os'
+import { platform } from '@tauri-apps/plugin-os'
 import bundledChangelog from 'floppa-web-shared/changelog.json'
 
-const GITHUB_REPO = 'okhsunrog/floppa-vpn'
-const GITHUB_RELEASES_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
 const LAST_SEEN_VERSION_KEY = 'lastSeenVersion'
+
+// Self-hosted update source: our server mirrors the latest release (binaries + metadata) at
+// <origin>/downloads/, so the update check, download and changelog are served from our own
+// origin instead of GitHub — insurance in case GitHub becomes unreachable for clients.
+const API_URL = (import.meta.env.VITE_API_URL as string) ?? ''
+const DOWNLOADS_BASE = API_URL.replace(/\/api\/?$/, '').replace(/\/+$/, '') + '/downloads'
 
 export interface UpdateInfo {
   version: string
   currentVersion: string
   downloadUrl: string
-  releaseUrl: string
-  publishedAt: string
-  body: string | null
 }
 
 export interface ForceUpdateInfo {
@@ -40,17 +41,11 @@ export interface ChangelogData extends ChangelogEntry {
   history?: ChangelogEntry[]
 }
 
-interface GitHubAsset {
-  name: string
-  browser_download_url: string
-}
-
-interface GitHubRelease {
-  tag_name: string
-  html_url: string
-  published_at: string
-  body: string | null
-  assets: GitHubAsset[]
+// Shape of /downloads/latest.json, written by the mirror-release workflow.
+interface LatestJson {
+  version: string
+  tag: string
+  files: Partial<Record<string, string>>
 }
 
 function compareSemver(a: string, b: string): number {
@@ -63,34 +58,30 @@ function compareSemver(a: string, b: string): number {
   return 0
 }
 
-function getPlatformAssetSuffix(): string {
-  const os = platform()
-  const cpu = arch() === 'aarch64' ? 'arm64' : arch()
-  switch (os) {
+// Map the running platform to its key in /downloads/latest.json `files`.
+function platformFileKey(): string | null {
+  switch (platform()) {
     case 'android':
-      return `android-${cpu}.apk`
+      return 'android'
     case 'linux':
-      return `linux-${cpu}.AppImage`
+      return 'linux_appimage'
     case 'windows':
-      return `windows-${cpu}.exe`
+      return 'windows_exe'
     default:
-      return ''
+      return null
   }
 }
 
-const changelogCache = new Map<string, ChangelogData>()
+let changelogCache: ChangelogData | null = null
 
-async function fetchChangelogForVersion(version: string): Promise<ChangelogData | null> {
-  if (changelogCache.has(version)) return changelogCache.get(version)!
+// The server mirrors the latest published version's changelog at /downloads/changelog.json.
+async function fetchLatestChangelog(): Promise<ChangelogData | null> {
+  if (changelogCache) return changelogCache
   try {
-    // Fetch directly from raw GitHub content — release download URLs
-    // redirect to objects.githubusercontent.com which fails in Android WebView
-    const url = `https://raw.githubusercontent.com/${GITHUB_REPO}/v${version}/floppa-web-shared/src/changelog.json`
-    const res = await fetch(url)
+    const res = await fetch(`${DOWNLOADS_BASE}/changelog.json`, { cache: 'no-cache' })
     if (!res.ok) return null
-    const data: ChangelogData = await res.json()
-    changelogCache.set(data.version, data)
-    return data
+    changelogCache = (await res.json()) as ChangelogData
+    return changelogCache
   } catch {
     return null
   }
@@ -132,31 +123,26 @@ export const useUpdateStore = defineStore('update', () => {
 
   async function checkForUpdates() {
     try {
-      const response = await fetch(GITHUB_RELEASES_URL, {
-        headers: { Accept: 'application/vnd.github+json' },
-      })
-      if (!response.ok) return
+      const res = await fetch(`${DOWNLOADS_BASE}/latest.json`, { cache: 'no-cache' })
+      if (!res.ok) return
 
-      const release: GitHubRelease = await response.json()
-      const remoteVersion = release.tag_name.replace(/^v/, '')
+      const latest = (await res.json()) as LatestJson
+      const remoteVersion = latest.version
       const currentVersion = __APP_VERSION__
 
       if (compareSemver(remoteVersion, currentVersion) <= 0) return
 
-      const suffix = getPlatformAssetSuffix()
-      const asset = release.assets.find((a) => a.name.endsWith(suffix))
+      const key = platformFileKey()
+      const file = key ? latest.files?.[key] : undefined
 
       updateInfo.value = {
         version: remoteVersion,
         currentVersion,
-        downloadUrl: asset?.browser_download_url ?? release.html_url,
-        releaseUrl: release.html_url,
-        publishedAt: release.published_at,
-        body: release.body,
+        downloadUrl: file ? `${DOWNLOADS_BASE}/${file}` : DOWNLOADS_BASE,
       }
 
       // Pre-fetch changelog for the available update
-      fetchChangelogForVersion(remoteVersion)
+      void fetchLatestChangelog()
     } catch {
       // Silently ignore — update check is best-effort
     }
@@ -168,7 +154,7 @@ export const useUpdateStore = defineStore('update', () => {
     changelogLoading.value = true
     changelogModalOpen.value = true
     try {
-      const data = await fetchChangelogForVersion(updateInfo.value.version)
+      const data = await fetchLatestChangelog()
       if (data) {
         loadChangelogData(data)
       } else {
