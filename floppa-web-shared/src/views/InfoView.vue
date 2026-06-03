@@ -7,6 +7,7 @@ import { listPublicPlansQuery, getPublicConfigQuery } from '../client/@pinia/col
 import { client } from '../client/client.gen'
 import { useAuthStore } from '../stores'
 import changelogData from '../changelog.json'
+import logoUrl from '../assets/logo.png'
 
 // `landing` is shown to logged-out visitors (web home, with a Login CTA);
 // `tab` is the in-app Info tab for authenticated users.
@@ -135,6 +136,12 @@ function onChangelogClick(event: MouseEvent) {
 
     <!-- Hero -->
     <section class="text-center mb-10">
+      <img
+        v-if="variant === 'landing'"
+        :src="logoUrl"
+        alt="Floppa VPN"
+        class="w-32 h-32 md:w-40 md:h-40 mx-auto mb-5 drop-shadow"
+      />
       <h1 class="text-3xl md:text-4xl font-bold mb-3">{{ t('info.heroTitle') }}</h1>
       <p class="text-[var(--ui-text-muted)] max-w-2xl mx-auto">{{ t('info.heroSubtitle') }}</p>
       <div class="flex flex-wrap justify-center gap-2 mt-4">

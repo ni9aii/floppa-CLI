@@ -38,9 +38,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Defaults to a local backend on :3000. Set FLOPPA_DEV_API to proxy at a remote
+      // backend instead, e.g. FLOPPA_DEV_API=https://floppa.okhsunrog.dev bun dev
       '/api': {
-        target: 'http://localhost:3000',
+        target: process.env.FLOPPA_DEV_API || 'http://localhost:3000',
         changeOrigin: true,
+        secure: true,
       },
     },
   },
