@@ -86,11 +86,21 @@ export function createAppRoutes(): RouteRecordRaw[] {
   ]
 }
 
-/** Parse Telegram user ID from Mini App initData (URL-encoded). */
-function getTelegramUserIdFromInitData(): number | null {
+/** Raw Mini App initData, or null when not running inside a Telegram Mini App. */
+function getTelegramInitData(): string | null {
   try {
     const initData = (window as { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp
       ?.initData
+    return initData && initData.length > 0 ? initData : null
+  } catch {
+    return null
+  }
+}
+
+/** Parse Telegram user ID from Mini App initData (URL-encoded). */
+function getTelegramUserIdFromInitData(): number | null {
+  try {
+    const initData = getTelegramInitData()
     if (!initData) return null
     const userJson = new URLSearchParams(initData).get('user')
     if (!userJson) return null
@@ -122,6 +132,12 @@ export function installAuthGuard(router: Router, options: AuthGuardOptions = {})
     }
 
     if (to.meta.requiresAuth && !auth.isAuthenticated) {
+      // Inside a Telegram Mini App, always go through /login: LoginView auto-logs in
+      // via initData and forwards to the dashboard, so the user never sees the public
+      // landing. Outside Telegram, logged-out visitors land on the configured page.
+      if (getTelegramInitData() !== null) {
+        return { name: 'login' }
+      }
       return { name: unauthenticatedRedirect }
     }
 

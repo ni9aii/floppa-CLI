@@ -34,7 +34,9 @@ const router = useRouter()
 const { t } = useI18n()
 const { data: config, status, error: configError } = useQuery(getPublicConfigQuery())
 const loginError = ref<string | null>(null)
-const miniAppLoading = ref(false)
+// Start in the loading state when opened inside a Mini App, so the auto-login spinner
+// shows from the first paint instead of briefly flashing the login tabs.
+const miniAppLoading = ref(getTelegramInitData() !== null)
 const manualCode = ref('')
 const manualCodeLoading = ref(false)
 const manualCodeError = ref<string | null>(null)
