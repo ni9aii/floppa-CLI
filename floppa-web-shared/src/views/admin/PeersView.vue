@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation } from '@pinia/colada'
@@ -7,6 +7,7 @@ import { listPeersQuery, deleteAdminPeerMutation } from '../../client/@pinia/col
 import type { PeerSummary } from '../../client/types.gen'
 import { formatBytes, formatDateTime } from '../../utils'
 import type { TableColumn } from '@nuxt/ui'
+import { useClientPagination, useConfirmAction } from '../../composables/adminList'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -15,9 +16,12 @@ const { data: peers, status, error, refresh: refreshPeers } = useQuery(listPeers
 const deleteMut = useMutation(deleteAdminPeerMutation())
 const search = ref('')
 
-const confirmOpen = ref(false)
-const confirmMessage = ref('')
-const pendingPeerId = ref<number | null>(null)
+const {
+  open: confirmOpen,
+  message: confirmMessage,
+  request: requestDeletePeer,
+  confirm: runDeletePeer,
+} = useConfirmAction()
 
 const filteredPeers = computed(() => {
   if (!peers.value) return []
@@ -32,41 +36,34 @@ const filteredPeers = computed(() => {
   )
 })
 
-// Client-side pagination (the list query returns all rows).
-const PAGE_SIZE = 100
-const page = ref(1)
-const paginatedPeers = computed(() =>
-  filteredPeers.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
-)
-watch(search, () => {
-  page.value = 1
-})
+const {
+  page,
+  paginated: paginatedPeers,
+  pageSize: PAGE_SIZE,
+} = useClientPagination(filteredPeers, search)
 
 function confirmDeletePeer(peerId: number, peerIp: string) {
-  pendingPeerId.value = peerId
-  confirmMessage.value = t('adminPeers.deleteConfirm', { ip: peerIp })
-  confirmOpen.value = true
+  requestDeletePeer(peerId, t('adminPeers.deleteConfirm', { ip: peerIp }))
 }
 
 async function doDeletePeer() {
-  if (!pendingPeerId.value) return
-  try {
-    await deleteMut.mutateAsync({ path: { id: pendingPeerId.value } })
-    await refreshPeers()
-    toast.add({
-      title: t('common.success'),
-      description: t('adminPeers.peerDeleted'),
-      color: 'success',
-    })
-  } catch (e) {
-    toast.add({
-      title: t('common.error'),
-      description: e instanceof Error ? e.message : t('adminPeers.deleteFailed'),
-      color: 'error',
-    })
-  }
-  confirmOpen.value = false
-  pendingPeerId.value = null
+  await runDeletePeer(async (id) => {
+    try {
+      await deleteMut.mutateAsync({ path: { id } })
+      await refreshPeers()
+      toast.add({
+        title: t('common.success'),
+        description: t('adminPeers.peerDeleted'),
+        color: 'success',
+      })
+    } catch (e) {
+      toast.add({
+        title: t('common.error'),
+        description: e instanceof Error ? e.message : t('adminPeers.deleteFailed'),
+        color: 'error',
+      })
+    }
+  })
 }
 
 const columns = computed<TableColumn<PeerSummary>[]>(() => [
