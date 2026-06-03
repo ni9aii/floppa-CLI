@@ -6,6 +6,7 @@ const router = createRouter({
   routes: createAppRoutes(),
 })
 
-installAuthGuard(router)
+// Logged-out visitors land on the public /welcome page (landing with plans + downloads).
+installAuthGuard(router, { unauthenticatedRedirect: 'welcome' })
 
 export default router

@@ -130,6 +130,7 @@ const navItems = computed(() => {
     { label: t('nav.dashboard'), icon: 'i-lucide-home', to: '/' },
     { label: t('nav.myConfigs'), icon: 'i-lucide-key', to: '/peers' },
     { label: t('nav.account'), icon: 'i-lucide-user-cog', to: '/account' },
+    { label: t('nav.info'), icon: 'i-lucide-info', to: '/info' },
   ]
 
   for (const item of props.extraNavItems) {
@@ -166,6 +167,7 @@ const mobileNavItems = computed(() => {
     { label: t('nav.dashboard'), icon: 'i-lucide-home', to: '/' },
     { label: t('nav.myConfigs'), icon: 'i-lucide-key', to: '/peers' },
     { label: t('nav.account'), icon: 'i-lucide-user-cog', to: '/account' },
+    { label: t('nav.info'), icon: 'i-lucide-info', to: '/info' },
   ]
 
   for (const item of props.extraNavItems) {
@@ -260,10 +262,10 @@ const mobileNavItems = computed(() => {
             <template
               v-for="section in (auth.isAdmin
                 ? [
-                    { items: mobileNavItems.slice(0, 2 + extraNavItems.length) },
+                    { items: mobileNavItems.slice(0, mobileNavItems.length - 6) },
                     {
                       label: t('nav.admin'),
-                      items: mobileNavItems.slice(2 + extraNavItems.length),
+                      items: mobileNavItems.slice(mobileNavItems.length - 6),
                     },
                   ]
                 : [{ items: mobileNavItems }]) as {

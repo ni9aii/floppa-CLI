@@ -4,7 +4,7 @@
 
 TAURI_CONF="floppa-client/src-tauri/tauri.conf.json5"
 CARGO_TOML="floppa-client/src-tauri/Cargo.toml"
-CHANGELOG="floppa-client/src/changelog.json"
+CHANGELOG="floppa-web-shared/src/changelog.json"
 PKGBUILD="scripts/arch/PKGBUILD"
 
 # Extract versions

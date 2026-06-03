@@ -3,7 +3,6 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVpnStore } from '../stores/vpnStore'
 import { useSettingsStore, type SplitMode } from '../stores/settingsStore'
-import { useUpdateStore } from '../stores/updateStore'
 import { useAndroidPermissions } from '../composables/useAndroidPermissions'
 import { commands } from '../bindings'
 
@@ -11,9 +10,7 @@ const { t } = useI18n()
 const toast = useToast()
 const vpn = useVpnStore()
 const settings = useSettingsStore()
-const updateStore = useUpdateStore()
 const permissions = useAndroidPermissions()
-const appVersion = __APP_VERSION__
 
 const exportingLogs = ref(false)
 const captureBusy = ref(false)
@@ -459,32 +456,6 @@ function selectMode(mode: SplitMode) {
       <div class="flex flex-col items-center gap-2 py-4 text-center text-[var(--ui-text-muted)]">
         <UIcon name="i-lucide-split" class="text-3xl" />
         <p>{{ t('settings.androidOnly') }}</p>
-      </div>
-    </UCard>
-
-    <!-- About -->
-    <UCard class="mt-4">
-      <template #header>
-        <div class="flex items-center gap-2">
-          <UIcon name="i-lucide-info" class="size-5" />
-          <span class="font-semibold">{{ t('settings.about') }}</span>
-        </div>
-      </template>
-
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="text-sm font-medium">Floppa VPN</p>
-          <p class="text-xs text-[var(--ui-text-muted)]">
-            {{ t('settings.version', { version: appVersion }) }}
-          </p>
-        </div>
-        <UButton
-          :label="t('changelog.whatsNew')"
-          icon="i-lucide-sparkles"
-          variant="soft"
-          size="sm"
-          @click="updateStore.openChangelogForCurrent()"
-        />
       </div>
     </UCard>
 

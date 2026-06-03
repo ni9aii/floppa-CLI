@@ -75,6 +75,43 @@ fn default_is_public() -> bool {
     true
 }
 
+/// Public-facing view of a plan (no internal `name`/`is_public`). Served unauthenticated
+/// to the landing page and Info tab so users can see pricing without logging in.
+#[derive(Serialize, ToSchema)]
+pub struct PublicPlan {
+    id: i32,
+    display_name: String,
+    default_speed_limit_mbps: Option<i32>,
+    max_peers: i32,
+    trial_days: Option<i32>,
+    price_stars: Option<i32>,
+    period_days: Option<i32>,
+}
+
+/// List public plans (no auth) — only plans flagged `is_public`. Used by the landing page
+/// and the in-app Info tab to display tariffs.
+#[utoipa::path(
+    get,
+    path = "/plans/public",
+    tag = "public",
+    responses(
+        (status = 200, body = Vec<PublicPlan>),
+    )
+)]
+pub(super) async fn list_public_plans(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<PublicPlan>>, ApiError> {
+    let plans: Vec<PublicPlan> = sqlx::query_as!(
+        PublicPlan,
+        "SELECT id, display_name, default_speed_limit_mbps, max_peers, trial_days, price_stars, period_days \
+         FROM plans WHERE is_public = true ORDER BY price_stars ASC NULLS FIRST, id ASC"
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(plans))
+}
+
 /// List all plans (admin only)
 #[utoipa::path(
     get,

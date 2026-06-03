@@ -69,6 +69,7 @@ fn openapi_router() -> OpenApiRouter<AppState> {
     // Public endpoints
     .routes(routes!(get_version))
     .routes(routes!(get_public_config))
+    .routes(routes!(plans::list_public_plans))
     .routes(routes!(auth::telegram_login))
     .routes(routes!(auth::start_telegram_deep_link_login))
     .routes(routes!(auth::telegram_deep_link_callback))

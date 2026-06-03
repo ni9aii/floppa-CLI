@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { platform, arch } from '@tauri-apps/plugin-os'
-import bundledChangelog from '../changelog.json'
+import bundledChangelog from 'floppa-web-shared/changelog.json'
 
 const GITHUB_REPO = 'okhsunrog/floppa-vpn'
 const GITHUB_RELEASES_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
@@ -85,7 +85,7 @@ async function fetchChangelogForVersion(version: string): Promise<ChangelogData 
   try {
     // Fetch directly from raw GitHub content — release download URLs
     // redirect to objects.githubusercontent.com which fails in Android WebView
-    const url = `https://raw.githubusercontent.com/${GITHUB_REPO}/v${version}/floppa-client/src/changelog.json`
+    const url = `https://raw.githubusercontent.com/${GITHUB_REPO}/v${version}/floppa-web-shared/src/changelog.json`
     const res = await fetch(url)
     if (!res.ok) return null
     const data: ChangelogData = await res.json()
