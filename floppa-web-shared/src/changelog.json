@@ -36,6 +36,10 @@
         {
           "en": "Info tab — browse available plans, app downloads for every platform, the changelog, and links to our Telegram channel, bot and GitHub (also a public landing page on the website)",
           "ru": "Вкладка «Информация» — тарифы, ссылки на скачивание для всех платформ, список изменений и ссылки на Telegram-канал, бота и GitHub (а на сайте — публичная страница-лендинг)"
+        },
+        {
+          "en": "Subscription reminders — the Telegram bot warns you the day before your subscription expires (and once it has), and /buy now shows what each plan includes",
+          "ru": "Напоминания о подписке — Telegram-бот предупреждает за день до окончания подписки (и когда она истекла), а в /buy теперь видно, что входит в каждый тариф"
         }
       ]
     },
@@ -49,6 +53,10 @@
         {
           "en": "Login via Telegram now opens a landing page with a one-tap link, plus a paste-the-code fallback if the deep link doesn't open the app",
           "ru": "Вход через Telegram теперь открывает страницу с ссылкой в одно нажатие и запасным вариантом со вставкой кода, если deep-link не открывает приложение"
+        },
+        {
+          "en": "App updates are now served from our own servers instead of GitHub, so update checks and downloads keep working even if GitHub is unreachable",
+          "ru": "Обновления приложения теперь раздаются с наших серверов, а не с GitHub — проверка и скачивание апдейтов работают, даже если GitHub недоступен"
         }
       ]
     },
