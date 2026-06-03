@@ -9,6 +9,12 @@ pub struct Messages {
     pub welcome: &'static str,
     pub trial_granted: &'static str,
     pub open_app: &'static str,
+    pub open_app_cta: &'static str,
+
+    // persistent reply-keyboard buttons (bottom menu)
+    pub btn_status: &'static str,
+    pub btn_buy: &'static str,
+    pub btn_lang: &'static str,
 
     // /status
     pub status_plan: &'static str,
@@ -60,11 +66,17 @@ pub struct Messages {
 }
 
 static EN: Messages = Messages {
-    welcome: "Welcome to Floppa VPN!\n\n\
-              Use the button below to manage your VPN configs and subscription.",
+    welcome: "Welcome to Floppa VPN! 🐱\n\n\
+              Use the menu below for quick actions, or open the app for the full dashboard, \
+              configs and downloads.",
 
     trial_granted: "You've been granted a free 7-day Basic subscription!",
     open_app: "Open Floppa VPN",
+    open_app_cta: "Full dashboard — configs, devices and downloads:",
+
+    btn_status: "📊 Status",
+    btn_buy: "💳 Buy",
+    btn_lang: "🌐 Language",
 
     status_plan: "Plan",
     status_expires: "Expires",
@@ -114,11 +126,17 @@ static EN: Messages = Messages {
 };
 
 static RU: Messages = Messages {
-    welcome: "Добро пожаловать в Floppa VPN!\n\n\
-              Используйте кнопку ниже для управления VPN-конфигами и подпиской.",
+    welcome: "Добро пожаловать в Floppa VPN! 🐱\n\n\
+              Используйте меню ниже для быстрых действий или откройте приложение — \
+              там полная панель, конфиги и загрузки.",
 
     trial_granted: "Вам предоставлена бесплатная 7-дневная подписка Basic!",
     open_app: "Открыть Floppa VPN",
+    open_app_cta: "Полная панель — конфиги, устройства и загрузки:",
+
+    btn_status: "📊 Статус",
+    btn_buy: "💳 Купить",
+    btn_lang: "🌐 Язык",
 
     status_plan: "Тариф",
     status_expires: "Истекает",
@@ -166,6 +184,30 @@ static RU: Messages = Messages {
     link_merge_done: "✅ Готово! Аккаунт восстановлен и привязан.",
     link_cancelled: "Отменено. Ничего не изменено.",
 };
+
+/// Action behind a tap on a persistent reply-keyboard button.
+pub enum BotMenuAction {
+    Status,
+    Buy,
+    Lang,
+}
+
+/// Map a plain text message to a reply-keyboard action, matching button labels in
+/// both languages (a user may have switched language since the keyboard was shown).
+pub fn match_menu_button(text: &str) -> Option<BotMenuAction> {
+    for m in [&EN, &RU] {
+        if text == m.btn_status {
+            return Some(BotMenuAction::Status);
+        }
+        if text == m.btn_buy {
+            return Some(BotMenuAction::Buy);
+        }
+        if text == m.btn_lang {
+            return Some(BotMenuAction::Lang);
+        }
+    }
+    None
+}
 
 /// Get messages for a language code string.
 pub fn for_lang(lang_code: Option<&str>) -> &'static Messages {
