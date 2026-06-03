@@ -48,7 +48,8 @@ jobs:
             --pattern '*.deb' \
             --pattern '*.exe' \
             --pattern '*.msi' \
-            --pattern '*.pkg.tar.zst'
+            --pattern '*.pkg.tar.zst' \
+            --pattern 'changelog.json'
           echo "Downloaded:" && ls -lh dl
 
       - name: Map to stable filenames + build latest.json
@@ -80,6 +81,8 @@ jobs:
             echo "  $f -> floppa-vpn-x86_64.pkg.tar.zst"
             break
           done
+          # Changelog for the latest version — the client fetches /downloads/changelog.json.
+          copy_one 'changelog.json' changelog.json
 
           cd ../mirror
           if [ -z "$(ls -A)" ]; then
