@@ -7,10 +7,10 @@
     "floppa-client"
   ],
   "dependencies": {
-    "tauri-plugin-android-fs-api": "^27.0.0"
+    "tauri-plugin-android-fs-api": "^28.1.0"
   },
   "devDependencies": {
-    "prettier": "^3.8.1",
-    "vite": "8.0.0-beta.16"
+    "prettier": "^3.8.3",
+    "vite": "8.0.16"
   }
 }
