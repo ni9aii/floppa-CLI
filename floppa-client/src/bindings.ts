@@ -12,15 +12,15 @@ export const commands = {
 	 *  Desktop: random UUID persisted in config dir.
 	 */
 	getDeviceId: () => typedError<string, string>(__TAURI_INVOKE("get_device_id")),
-	// Get the device name (Android: manufacturer+model, desktop: hostname)
+	/**  Get the device name (Android: manufacturer+model, desktop: hostname) */
 	getDeviceName: () => __TAURI_INVOKE<string>("get_device_name"),
-	// Parse a config string (WireGuard or VLESS URI), store under the right protocol key, and persist.
+	/**  Parse a config string (WireGuard or VLESS URI), store under the right protocol key, and persist. */
 	setActiveConfig: (configStr: string) => typedError<null, string>(__TAURI_INVOKE("set_active_config", { configStr })),
-	// Clear all configs from memory and delete persisted config. Disconnects first if connected.
+	/**  Clear all configs from memory and delete persisted config. Disconnects first if connected. */
 	clearConfig: () => typedError<null, string>(__TAURI_INVOKE("clear_config")),
-	// Load persisted VPN configs into memory (called on startup).
+	/**  Load persisted VPN configs into memory (called on startup). */
 	loadSavedConfig: () => typedError<boolean, string>(__TAURI_INVOKE("load_saved_config")),
-	// Get active protocol's config (without private key for security)
+	/**  Get active protocol's config (without private key for security) */
 	getConfig: () => typedError<{
 	protocol: string,
 	address: string,
@@ -29,59 +29,60 @@ export const commands = {
 	allowed_ips: string,
 	mtu: number | null,
 } | null, string>(__TAURI_INVOKE("get_config")),
-	// Switch the active protocol (must disconnect first)
+	/**  Switch the active protocol (must disconnect first) */
 	setActiveProtocol: (protocol: string) => typedError<null, string>(__TAURI_INVOKE("set_active_protocol", { protocol })),
-	// Get list of protocols that have cached configs
+	/**  Get list of protocols that have cached configs */
 	getAvailableProtocols: () => typedError<string[], string>(__TAURI_INVOKE("get_available_protocols")),
-	// Connect to VPN
+	/**  Connect to VPN */
 	connect: (splitMode: "all" | "include" | "exclude" | null, selectedApps: string[] | null) => typedError<null, string>(__TAURI_INVOKE("connect", { splitMode, selectedApps })),
-	// Disconnect from VPN
+	/**  Disconnect from VPN */
 	disconnect: () => typedError<null, string>(__TAURI_INVOKE("disconnect")),
-	// Get current connection info with live traffic stats
+	/**  Get current connection info with live traffic stats */
 	getConnectionInfo: () => typedError<ConnectionInfo, string>(__TAURI_INVOKE("get_connection_info")),
-	// Get list of installed apps for split tunneling (Android only)
+	/**  Get list of installed apps for split tunneling (Android only) */
 	getInstalledApps: () => typedError<AppInfo[], string>(__TAURI_INVOKE("get_installed_apps")),
-	// Check if battery optimization is disabled (Android only)
+	/**  Check if battery optimization is disabled (Android only) */
 	isBatteryOptimizationDisabled: () => typedError<boolean, string>(__TAURI_INVOKE("is_battery_optimization_disabled")),
 	/**
 	 *  Request the user to disable battery optimization (Android only)
 	 *  Returns whether battery optimization is now disabled after the user responds.
 	 */
 	requestDisableBatteryOptimization: () => typedError<boolean, string>(__TAURI_INVOKE("request_disable_battery_optimization")),
-	// Check if notifications are enabled (Android only)
+	/**  Check if notifications are enabled (Android only) */
 	areNotificationsEnabled: () => typedError<boolean, string>(__TAURI_INVOKE("are_notifications_enabled")),
 	/**
 	 *  Request notification permission (Android only)
 	 *  Returns whether notifications are now enabled after the user responds.
 	 */
 	openNotificationSettings: () => typedError<boolean, string>(__TAURI_INVOKE("open_notification_settings")),
-	// Get safe area insets (status bar, nav bar heights) in dp
+	/**  Get safe area insets (status bar, nav bar heights) in dp */
 	getSafeAreaInsets: () => typedError<SafeAreaInsets, string>(__TAURI_INVOKE("get_safe_area_insets")),
-	// Set status bar icon style to match app theme (Android only)
+	/**  Set status bar icon style to match app theme (Android only) */
 	setStatusBarStyle: (isDark: boolean) => typedError<null, string>(__TAURI_INVOKE("set_status_bar_style", { isDark })),
-	// Get the log directory path
+	/**  Get the log directory path */
 	getLogDir: () => typedError<string, string>(__TAURI_INVOKE("get_log_dir")),
-	// Get current diagnostic capture status.
+	/**  Get current diagnostic capture status. */
 	getLogCaptureStatus: () => __TAURI_INVOKE<LogCaptureStatus>("get_log_capture_status"),
 	/**
 	 *  Start a diagnostic capture. This enables verbose runtime logs and starts
 	 *  writing capture files without changing the user's saved profile permanently.
 	 */
 	startLogCapture: () => typedError<LogCaptureStatus, string>(__TAURI_INVOKE("start_log_capture")),
-	// Stop the active diagnostic capture and restore the previous runtime profile.
+	/**  Stop the active diagnostic capture and restore the previous runtime profile. */
 	stopLogCapture: () => typedError<LogCaptureStatus, string>(__TAURI_INVOKE("stop_log_capture")),
 	/**
 	 *  Export latest diagnostic capture as a tar.gz archive via native save dialog.
 	 *  Returns `true` if saved successfully, `false` if the user cancelled.
 	 */
 	exportLogs: () => typedError<boolean, string>(__TAURI_INVOKE("export_logs")),
-	// Get the current log configuration.
+	/**  Get the current log configuration. */
 	getLogConfig: () => __TAURI_INVOKE<LogConfig>("get_log_config"),
-	// Apply a new log configuration. Persists to disk and propagates to VPN process.
+	/**  Apply a new log configuration. Persists to disk and propagates to VPN process. */
 	setLogConfig: (config: LogConfig) => typedError<null, string>(__TAURI_INVOKE("set_log_config", { config })),
 };
 
-/* Types */// Information about an installed app (for split tunneling UI)
+/* Types */
+/**  Information about an installed app (for split tunneling UI) */
 export type AppInfo = {
 	package_name: string,
 	label: string,
@@ -89,7 +90,7 @@ export type AppInfo = {
 	icon: string | null,
 };
 
-// Safe config info (no private keys or secrets)
+/**  Safe config info (no private keys or secrets) */
 export type ConfigSafe = {
 	protocol: string,
 	address: string,
@@ -99,7 +100,7 @@ export type ConfigSafe = {
 	mtu: number | null,
 };
 
-// Connection information
+/**  Connection information */
 export type ConnectionInfo = {
 	status: ConnectionStatus,
 	protocol: string | null,
@@ -110,7 +111,7 @@ export type ConnectionInfo = {
 	stats: TrafficStats,
 };
 
-// Connection status enum
+/**  Connection status enum */
 export type ConnectionStatus = "disconnected" | "connecting" | "verifying_connection" | "connected" | "disconnecting";
 
 export type LogCaptureStatus = {
@@ -118,33 +119,33 @@ export type LogCaptureStatus = {
 	capture_id: string | null,
 };
 
-// Persistent runtime logging configuration.
+/**  Persistent runtime logging configuration. */
 export type LogConfig = {
-	// Active profile for runtime logs (logcat/stdout and capture files).
-	profile: LogProfile,
-	// Optional raw RUST_LOG-style filter string, stored separately from activation.
-	custom_filter: string | null,
-	// When true, `custom_filter` replaces the selected profile.
-	custom_filter_enabled: boolean,
+	/**  Active profile for runtime logs (logcat/stdout and capture files). */
+	profile?: LogProfile,
+	/**  Optional raw RUST_LOG-style filter string, stored separately from activation. */
+	custom_filter?: string | null,
+	/**  When true, `custom_filter` replaces the selected profile. */
+	custom_filter_enabled?: boolean,
 };
 
 export type LogProfile = "normal" | "verbose";
 
-// Safe area insets (status bar, nav bar) in dp
+/**  Safe area insets (status bar, nav bar) in dp */
 export type SafeAreaInsets = {
-	top: number,
-	bottom: number,
+	top: number | null,
+	bottom: number | null,
 };
 
-// Split tunneling mode
+/**  Split tunneling mode */
 export type SplitMode = "all" | "include" | "exclude";
 
-// Traffic statistics
+/**  Traffic statistics */
 export type TrafficStats = {
 	tx_bytes: number,
 	rx_bytes: number,
-	tx_bytes_per_sec: number,
-	rx_bytes_per_sec: number,
+	tx_bytes_per_sec: number | null,
+	rx_bytes_per_sec: number | null,
 };
 
 /* Tauri Specta runtime */

@@ -56,7 +56,10 @@ pub fn run() {
             vpn::commands::get_log_config,
             vpn::commands::set_log_config,
         ])
-        .events(tauri_specta::collect_events![]);
+        .events(tauri_specta::collect_events![])
+        // specta rc.25 forbids exporting BigInt-style types (i64/u64/usize/…) by default.
+        // We export them as TS `number` (as before the upgrade) — IDs/byte counters stay numbers.
+        .dangerously_cast_bigints_to_number();
 
     // Export TypeScript bindings in debug mode on desktop.
     // Use if-let to avoid panicking when launched from a different working directory
@@ -64,9 +67,7 @@ pub fn run() {
     #[cfg(all(debug_assertions, not(target_os = "android")))]
     {
         if let Err(err) = specta_builder.export(
-            specta_typescript::Typescript::default()
-                .bigint(specta_typescript::BigIntExportBehavior::Number)
-                .header("/* eslint-disable */\n// @ts-nocheck"),
+            specta_typescript::Typescript::default().header("/* eslint-disable */\n// @ts-nocheck"),
             "../src/bindings.ts",
         ) {
             eprintln!("Warning: Failed to export TypeScript bindings: {err}");

@@ -45,7 +45,14 @@ const profileOptions = [
 ]
 
 async function loadLogConfig() {
-  logConfig.value = await commands.getLogConfig()
+  // getLogConfig() now returns optional fields (Rust #[serde(default)] → optional in specta
+  // rc.25 bindings); normalize to our always-present shape.
+  const cfg = await commands.getLogConfig()
+  logConfig.value = {
+    profile: cfg.profile ?? 'normal',
+    custom_filter: cfg.custom_filter ?? null,
+    custom_filter_enabled: cfg.custom_filter_enabled ?? false,
+  }
   customFilterInput.value = logConfig.value.custom_filter ?? ''
 }
 
