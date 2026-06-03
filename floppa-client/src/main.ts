@@ -65,7 +65,7 @@ function setupConsoleForwarding() {
 }
 
 setupConsoleForwarding()
-info('[web] Frontend initialized')
+void info('[web] Frontend initialized')
 
 const app = createApp(App)
 
@@ -189,9 +189,9 @@ async function handleDeepLinkUrls(urls: string[]) {
       authStore.setAuth(response.token, response.user)
       processedDeepLinkCodes.add(code)
       await router.push('/')
-      info('[web] Deep-link login completed.')
+      void info('[web] Deep-link login completed.')
     } catch (e) {
-      error(`[web] Failed to exchange deep-link login code: ${e}`)
+      void error(`[web] Failed to exchange deep-link login code: ${String(e)}`)
     } finally {
       processingDeepLinkCodes.delete(code)
     }
@@ -221,13 +221,13 @@ async function setupDeepLinkAuth() {
       if (urls.length === 0) {
         return
       }
-      info('[web] Deep-link received from single-instance payload.')
+      void info('[web] Deep-link received from single-instance payload.')
       void handleDeepLinkUrls(urls)
     })
 
-    info('[web] Deep-link listener initialized.')
+    void info('[web] Deep-link listener initialized.')
   } catch (e) {
-    error(`[web] Failed to initialize deep-link listener: ${e}`)
+    void error(`[web] Failed to initialize deep-link listener: ${String(e)}`)
   }
 }
 
@@ -260,7 +260,7 @@ void updateStore.checkForUpdates()
   const removeHook = router.afterEach((to) => {
     if (to.meta.requiresAuth && authStore.isAuthenticated) {
       removeHook()
-      void updateStore.checkPostUpdateChangelog()
+      updateStore.checkPostUpdateChangelog()
     }
   })
 }

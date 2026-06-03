@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vite-plus'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import ui from '@nuxt/ui/vite'
@@ -79,7 +79,6 @@ export default defineConfig({
       'pinia',
       'vue-i18n',
       '@pinia/colada',
-      '@hey-api/client-fetch',
       '@tauri-apps/api/webviewWindow',
       '@tauri-apps/plugin-os',
       '@tauri-apps/plugin-shell',

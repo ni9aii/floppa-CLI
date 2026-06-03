@@ -42,7 +42,7 @@ export const useVpnStore = defineStore(
     // Initialize platform detection and device info
     async function initPlatform() {
       try {
-        const os = await platform()
+        const os = platform()
         isAndroid.value = os === 'android'
 
         // Load device identifiers
