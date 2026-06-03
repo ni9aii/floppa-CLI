@@ -519,7 +519,7 @@ const healthDotClass = computed(() => {
             {{ formatBytes(vpn.connectionInfo.stats.tx_bytes) }}
           </span>
           <span class="text-xs text-[var(--ui-text-muted)]">
-            {{ formatSpeed(vpn.connectionInfo.stats.tx_bytes_per_sec) }}
+            {{ formatSpeed(vpn.connectionInfo.stats.tx_bytes_per_sec ?? 0) }}
           </span>
         </div>
       </div>
@@ -530,7 +530,7 @@ const healthDotClass = computed(() => {
             {{ formatBytes(vpn.connectionInfo.stats.rx_bytes) }}
           </span>
           <span class="text-xs text-[var(--ui-text-muted)]">
-            {{ formatSpeed(vpn.connectionInfo.stats.rx_bytes_per_sec) }}
+            {{ formatSpeed(vpn.connectionInfo.stats.rx_bytes_per_sec ?? 0) }}
           </span>
         </div>
       </div>

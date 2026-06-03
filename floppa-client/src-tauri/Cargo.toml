@@ -25,9 +25,9 @@ tauri-plugin-os = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
-specta = { version = "=2.0.0-rc.23", features = ["derive"] }
-specta-typescript = { version = "0.0.10" }
-tauri-specta = { git = "https://github.com/specta-rs/tauri-specta", rev = "b7cd99b", features = ["typescript", "derive"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = { version = "0.0.12" }
+tauri-specta = { git = "https://github.com/specta-rs/tauri-specta", rev = "40a7b831b0493ac2be7bc7bfd55980d5a6802044", features = ["typescript", "derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tokio = { version = "1", features = ["full"] }
@@ -53,7 +53,7 @@ hostname = "0.4.2"
 keyring = { version = "3.6.3", features = ["crypto-rust"] }
 tauri-plugin-opener = "2.5.3"
 tempfile = "3.26.0"
-tauri-plugin-android-fs = "27.1.0"
+tauri-plugin-android-fs = "28"
 # VLESS+REALITY protocol support
 shoes-lite = { git = "https://github.com/okhsunrog/shoes-lite", rev = "d2fdeb2" }
 logroller = "0.1.10"
