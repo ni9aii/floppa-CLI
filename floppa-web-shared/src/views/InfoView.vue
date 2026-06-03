@@ -124,8 +124,11 @@ function onChangelogClick(event: MouseEvent) {
 
 <template>
   <div class="max-w-5xl mx-auto">
-    <!-- Landing-only top bar: brand + theme/language toggles + login (no app navbar for guests) -->
-    <div v-if="variant === 'landing'" class="flex items-center justify-between mb-8">
+    <!-- Top bar only for logged-out visitors; authenticated users already have the app navbar. -->
+    <div
+      v-if="variant === 'landing' && !auth.isAuthenticated"
+      class="flex items-center justify-between mb-8"
+    >
       <span class="font-bold text-xl text-[var(--ui-primary)]">Floppa VPN</span>
       <div class="flex items-center gap-2">
         <ColorModeButton />
@@ -136,18 +139,7 @@ function onChangelogClick(event: MouseEvent) {
           size="sm"
           @click="toggleLocale"
         />
-        <UButton
-          v-if="!auth.isAuthenticated"
-          :label="t('info.login')"
-          icon="i-lucide-log-in"
-          @click="router.push('/login')"
-        />
-        <UButton
-          v-else
-          :label="t('info.openApp')"
-          icon="i-lucide-layout-dashboard"
-          @click="router.push('/')"
-        />
+        <UButton :label="t('info.login')" icon="i-lucide-log-in" @click="router.push('/login')" />
       </div>
     </div>
 
