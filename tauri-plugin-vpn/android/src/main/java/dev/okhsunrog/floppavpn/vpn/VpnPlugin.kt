@@ -198,7 +198,12 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
                 for (appInfo in apps) {
                     if (appInfo.packageName == ownPackage) continue
 
-                    val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    // Preinstalled apps carry FLAG_SYSTEM, but user-facing ones (YouTube, Maps,
+                    // Chrome, …) have a launcher entry. Treat those as non-system so they show up
+                    // in the main list instead of being hidden behind "show system apps".
+                    val isSystemFlag = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    val hasLauncher = pm.getLaunchIntentForPackage(appInfo.packageName) != null
+                    val isSystem = isSystemFlag && !hasLauncher
 
                     val entry = JSObject()
                     entry.put("packageName", appInfo.packageName)
