@@ -8,6 +8,7 @@ import { client } from '../client/client.gen'
 import { useAuthStore } from '../stores'
 import changelogData from '../changelog.json'
 import logoUrl from '../assets/logo.png'
+import ColorModeButton from '../components/ColorModeButton.vue'
 
 // `landing` is shown to logged-out visitors (web home, with a Login CTA);
 // `tab` is the in-app Info tab for authenticated users.
@@ -67,6 +68,12 @@ function planPrice(price: number | null | undefined): string {
   return price ? `${price} ⭐` : t('common.free')
 }
 
+function toggleLocale() {
+  const next = locale.value === 'ru' ? 'en' : 'ru'
+  locale.value = next
+  localStorage.setItem('locale', next)
+}
+
 // Changelog (bundled at build time from floppa-web-shared/changelog.json; shown on web + client).
 interface ChangelogItem {
   en: string
@@ -117,21 +124,31 @@ function onChangelogClick(event: MouseEvent) {
 
 <template>
   <div class="max-w-5xl mx-auto">
-    <!-- Landing-only top bar: brand + login (no app navbar for logged-out visitors) -->
+    <!-- Landing-only top bar: brand + theme/language toggles + login (no app navbar for guests) -->
     <div v-if="variant === 'landing'" class="flex items-center justify-between mb-8">
       <span class="font-bold text-xl text-[var(--ui-primary)]">Floppa VPN</span>
-      <UButton
-        v-if="!auth.isAuthenticated"
-        :label="t('info.login')"
-        icon="i-lucide-log-in"
-        @click="router.push('/login')"
-      />
-      <UButton
-        v-else
-        :label="t('info.openApp')"
-        icon="i-lucide-layout-dashboard"
-        @click="router.push('/')"
-      />
+      <div class="flex items-center gap-2">
+        <ColorModeButton />
+        <UButton
+          :label="locale === 'ru' ? 'EN' : 'RU'"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          @click="toggleLocale"
+        />
+        <UButton
+          v-if="!auth.isAuthenticated"
+          :label="t('info.login')"
+          icon="i-lucide-log-in"
+          @click="router.push('/login')"
+        />
+        <UButton
+          v-else
+          :label="t('info.openApp')"
+          icon="i-lucide-layout-dashboard"
+          @click="router.push('/')"
+        />
+      </div>
     </div>
 
     <!-- Hero -->
