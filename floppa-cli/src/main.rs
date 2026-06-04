@@ -1,18 +1,25 @@
 mod api;
 mod auth;
 mod dns;
+mod net;
+mod paths;
+mod service;
+mod stop;
 mod tunnel;
 mod vless;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+#[cfg(unix)]
+use tokio::signal::unix::SignalKind;
 
 const DEFAULT_API_URL: &str = "https://floppa.okhsunrog.dev/api";
 
 #[derive(Parser)]
-#[command(name = "floppa-cli", about = "CLI client for Floppa VPN")]
+#[command(name = "floppa-cli", about = "CLI client for Floppa VPN", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
-    /// Write debug logs to a file (e.g. /tmp/floppa-cli.log)
+    /// Write debug logs to a file, for example `floppa-cli.log`
     #[arg(long, global = true)]
     log_file: Option<String>,
 
@@ -22,8 +29,37 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Log in via Telegram (opens browser)
+    /// Choose login method or prompt interactively.
     Login {
+        /// Login method. If omitted, the CLI asks interactively.
+        #[arg(long, value_enum)]
+        method: Option<auth::LoginMethod>,
+        /// Account login for `--method account`. If omitted, it is prompted interactively.
+        #[arg(long, env = "FLOPPA_ACCOUNT_LOGIN")]
+        login: Option<String>,
+        /// Environment variable that contains the password for `--method account`.
+        /// If unset, password is prompted hidden.
+        #[arg(
+            long,
+            env = "FLOPPA_ACCOUNT_PASSWORD_ENV",
+            default_value = "FLOPPA_ACCOUNT_PASSWORD"
+        )]
+        password_env: String,
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+    /// Log in with a Floppa account login + password without method selection.
+    LoginAccount {
+        /// Account login. If omitted, it is prompted interactively.
+        #[arg(long, env = "FLOPPA_ACCOUNT_LOGIN")]
+        login: Option<String>,
+        /// Environment variable that contains the password. If unset, password is prompted hidden.
+        #[arg(
+            long,
+            env = "FLOPPA_ACCOUNT_PASSWORD_ENV",
+            default_value = "FLOPPA_ACCOUNT_PASSWORD"
+        )]
+        password_env: String,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
@@ -33,14 +69,17 @@ enum Command {
         #[arg(long)]
         config: Option<String>,
         /// Protocol: wireguard (default), amneziawg, or vless
-        #[arg(long, default_value = "wireguard")]
-        protocol: String,
+        #[arg(long, default_value = "wireguard", value_enum)]
+        protocol: Protocol,
         /// TUN interface name
         #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
         interface: String,
         /// Skip DNS configuration
         #[arg(long)]
         no_dns: bool,
+        /// Skip WireGuard handshake verification after connect (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
@@ -49,23 +88,234 @@ enum Command {
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
+    /// Manage peers: delete stale or device-specific peers
+    Peer {
+        #[command(subcommand)]
+        command: PeerCommand,
+    },
+    /// Manage VLESS config
+    Vless {
+        #[command(subcommand)]
+        command: VlessCommand,
+    },
+    /// Manage local CLI device identity
+    Device {
+        #[command(subcommand)]
+        command: DeviceCommand,
+    },
     /// Fetch and print config (WireGuard/AmneziaWG .conf or VLESS URI)
     Config {
         /// Protocol: wireguard (default), amneziawg, or vless
-        #[arg(long, default_value = "wireguard")]
-        protocol: String,
+        #[arg(long, default_value = "wireguard", value_enum)]
+        protocol: Protocol,
         /// Peer ID (WireGuard/AmneziaWG only; uses first active peer of that protocol if omitted)
         #[arg(long)]
         peer_id: Option<i64>,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
+    /// Show local tunnel status without contacting the API
+    Status {
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
+    },
+    /// Safely stop a running floppa-cli connect process
+    Stop {
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
+        /// Target a specific floppa-cli connect PID when multiple are running
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Send SIGKILL if graceful SIGTERM stop times out
+        #[arg(long)]
+        force: bool,
+    },
+    /// Install and manage a systemd service for the VPN tunnel
+    Service {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
     /// Remove saved login token
     Logout,
 }
 
+#[derive(Subcommand)]
+enum ServiceCommand {
+    /// Install a systemd unit for `floppa-cli connect`
+    Install {
+        /// Absolute path to the floppa-cli binary
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Protocol passed to `connect`
+        #[arg(long, default_value = "amneziawg", value_enum)]
+        protocol: Protocol,
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
+        /// Skip DNS configuration
+        #[arg(long)]
+        no_dns: bool,
+        /// Skip WireGuard handshake verification in the service (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
+        /// Static WireGuard/AmneziaWG .conf file; if set, skips API fetch at startup
+        #[arg(long)]
+        config: Option<String>,
+        /// API URL passed to `connect`
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+        /// Unix user that should run the service
+        #[arg(long, env = "USER")]
+        user: Option<String>,
+        /// Home directory for the service user
+        #[arg(long, env = "HOME")]
+        home: Option<PathBuf>,
+        /// Absolute path to the service log file
+        #[arg(long = "service-log-file")]
+        svc_log_file: Option<PathBuf>,
+    },
+    /// Remove an installed systemd unit
+    Uninstall,
+    /// Start the systemd service
+    Start,
+    /// Stop the systemd service
+    Stop,
+    /// Restart the systemd service
+    Restart,
+    /// Show systemd service status
+    Status,
+    /// Enable the systemd service at boot
+    Enable,
+    /// Disable the systemd service at boot
+    Disable,
+}
+
+#[derive(Subcommand)]
+enum PeerCommand {
+    /// Delete one peer, all peers for this device/protocol, or all peers
+    Delete {
+        /// Exact peer ID to delete
+        #[arg(long)]
+        peer_id: Option<i64>,
+        /// Delete all active peers for this protocol and this CLI device
+        #[arg(long)]
+        protocol: Option<String>,
+        /// Delete all peers for the current account. Use with care.
+        #[arg(long)]
+        all: bool,
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum VlessCommand {
+    /// Regenerate VLESS UUID and print the new URI
+    Regenerate {
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceCommand {
+    /// Print local device_id/device_name
+    Show,
+    /// Generate a new local device identity
+    Reset,
+}
+
 fn is_vless(config_str: &str) -> bool {
     config_str.trim().starts_with("vless://")
+}
+
+fn is_network_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|re| re.is_connect() || re.is_timeout())
+    })
+}
+
+/// Try `op` once immediately; on retryable error sleep `delays_secs[i]` and retry.
+/// Total attempts = delays_secs.len() + 1. Non-retryable errors fail immediately.
+async fn retry_with_backoff<T, F, Fut>(
+    delays_secs: &[u64],
+    is_retryable: impl Fn(&anyhow::Error) -> bool,
+    mut op: F,
+) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    for (attempt, &delay) in delays_secs.iter().enumerate() {
+        match op().await {
+            Ok(v) => return Ok(v),
+            Err(e) if is_retryable(&e) => {
+                eprintln!(
+                    "Network error (attempt {}/{}): {e:#}",
+                    attempt + 1,
+                    delays_secs.len() + 1
+                );
+                eprintln!("Retrying in {delay}s...");
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    op().await
+}
+
+async fn fetch_config_from_api(api_url: &str, protocol: &str) -> Result<String> {
+    const DELAYS: &[u64] = &[10, 20, 40, 60, 60];
+
+    let token = auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+    let client = api::ApiClient::new(api_url, &token);
+
+    retry_with_backoff(DELAYS, is_network_error, || async {
+        let me = client.get_me().await.context("Failed to reach API")?;
+        if let Some(ref sub) = me.subscription {
+            eprintln!(
+                "Plan: {} (speed limit: {})",
+                sub.plan_name,
+                sub.speed_limit_mbps
+                    .map(|s| format!("{s} Mbps"))
+                    .unwrap_or_else(|| "unlimited".into())
+            );
+        } else {
+            bail!("No active subscription");
+        }
+        client.find_or_create_peer(protocol).await
+    })
+    .await
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
+enum Protocol {
+    #[value(name = "wireguard")]
+    WireGuard,
+    #[value(name = "amneziawg")]
+    AmneziaWg,
+    #[value(name = "vless")]
+    Vless,
+}
+
+impl Protocol {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Protocol::WireGuard => "wireguard",
+            Protocol::AmneziaWg => "amneziawg",
+            Protocol::Vless => "vless",
+        }
+    }
 }
 
 #[tokio::main]
@@ -101,39 +351,40 @@ async fn main() -> Result<()> {
     tracing_log::LogTracer::init().ok();
 
     match cli.command {
-        Command::Login { api_url } => {
-            auth::login(&api_url).await?;
+        Command::Login {
+            method,
+            login,
+            password_env,
+            api_url,
+        } => {
+            auth::login(&api_url, method, login.as_deref(), &password_env).await?;
+        }
+        Command::LoginAccount {
+            login,
+            password_env,
+            api_url,
+        } => {
+            auth::login_account(&api_url, login.as_deref(), &password_env).await?;
         }
         Command::Connect {
             config,
             protocol,
             interface,
             no_dns,
+            skip_handshake_check,
             api_url,
         } => {
             let config_str = match config {
                 Some(path) => std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {path}"))?,
                 None => {
-                    let token = auth::load_token()?
-                        .context("Not logged in. Run `floppa-cli login` first.")?;
-                    let client = api::ApiClient::new(&api_url, &token);
-                    let me = client.get_me().await?;
-                    if let Some(ref sub) = me.subscription {
-                        eprintln!(
-                            "Plan: {} (speed limit: {})",
-                            sub.plan_name,
-                            sub.speed_limit_mbps
-                                .map(|s| format!("{s} Mbps"))
-                                .unwrap_or_else(|| "unlimited".into())
-                        );
-                    } else {
-                        bail!("No active subscription");
-                    }
-                    if protocol == "vless" {
+                    if protocol == Protocol::Vless {
+                        let token = auth::load_token()?
+                            .context("Not logged in. Run `floppa-cli login` first.")?;
+                        let client = api::ApiClient::new(&api_url, &token);
                         client.get_vless_config().await?
                     } else {
-                        client.find_or_create_peer(&protocol).await?
+                        fetch_config_from_api(&api_url, protocol.as_str()).await?
                     }
                 }
             };
@@ -141,7 +392,7 @@ async fn main() -> Result<()> {
             if is_vless(&config_str) {
                 connect_vless(&config_str, &interface, no_dns).await?;
             } else {
-                connect_wireguard(&config_str, &interface, no_dns).await?;
+                connect_wireguard(&config_str, &interface, no_dns, skip_handshake_check).await?;
             }
         }
         Command::Peers { api_url } => {
@@ -152,17 +403,102 @@ async fn main() -> Result<()> {
             if peers.is_empty() {
                 eprintln!("No peers found.");
             } else {
-                println!("{:<6} {:<18} {:<14} Device", "ID", "IP", "Status");
+                println!(
+                    "{:<6} {:<18} {:<14} {:<32} Device",
+                    "ID", "IP", "Status", "Device ID"
+                );
                 for p in &peers {
                     println!(
-                        "{:<6} {:<18} {:<14} {}",
+                        "{:<6} {:<18} {:<14} {:<32} {}",
                         p.id,
                         p.assigned_ip,
                         p.sync_status,
+                        p.device_id.as_deref().unwrap_or("-"),
                         p.device_name.as_deref().unwrap_or("-")
                     );
                 }
             }
+        }
+        Command::Peer {
+            command:
+                PeerCommand::Delete {
+                    peer_id,
+                    protocol,
+                    all,
+                    api_url,
+                },
+        } => {
+            let token =
+                auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+            let client = api::ApiClient::new(&api_url, &token);
+
+            let identity = if protocol.is_some() || all {
+                Some(api::get_or_create_device_identity()?)
+            } else {
+                None
+            };
+            let peers = if protocol.is_some() || all {
+                Some(client.list_peers().await?)
+            } else {
+                None
+            };
+
+            let mut ids = Vec::new();
+            if let Some(id) = peer_id {
+                ids.push(id);
+            } else if let Some(protocol) = protocol {
+                let identity = identity.as_ref().expect("identity loaded above");
+                ids.extend(
+                    peers
+                        .as_ref()
+                        .expect("peers loaded above")
+                        .iter()
+                        .filter(|p| {
+                            p.protocol == protocol
+                                && p.device_id.as_deref() == Some(identity.device_id.as_str())
+                        })
+                        .map(|p| p.id),
+                );
+            } else if all {
+                ids.extend(
+                    peers
+                        .as_ref()
+                        .expect("peers loaded above")
+                        .iter()
+                        .map(|p| p.id),
+                );
+            } else {
+                bail!("Provide --peer-id, --protocol, or --all");
+            }
+
+            if ids.is_empty() {
+                eprintln!("No matching peers found.");
+            }
+            for id in ids {
+                client.delete_peer(id).await?;
+                println!("Deleted peer {id}.");
+            }
+        }
+        Command::Vless {
+            command: VlessCommand::Regenerate { api_url },
+        } => {
+            let token =
+                auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+            let client = api::ApiClient::new(&api_url, &token);
+            let uri = client.regenerate_vless_config().await?;
+            println!("{uri}");
+        }
+        Command::Device {
+            command: DeviceCommand::Show,
+        } => {
+            let identity = api::get_or_create_device_identity()?;
+            println!("{}", serde_json::to_string_pretty(&identity)?);
+        }
+        Command::Device {
+            command: DeviceCommand::Reset,
+        } => {
+            let identity = api::reset_device_identity()?;
+            println!("{}", serde_json::to_string_pretty(&identity)?);
         }
         Command::Config {
             protocol,
@@ -172,15 +508,32 @@ async fn main() -> Result<()> {
             let token =
                 auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
             let client = api::ApiClient::new(&api_url, &token);
-            let config = if protocol == "vless" {
+            let config = if protocol == Protocol::Vless {
                 client.get_vless_config().await?
             } else {
                 match peer_id {
                     Some(id) => client.get_peer_config(id).await?,
-                    None => client.find_or_create_peer(&protocol).await?,
+                    None => client.find_or_create_peer(protocol.as_str()).await?,
                 }
             };
             print!("{config}");
+        }
+        Command::Status { interface } => {
+            tunnel::status(&interface)?;
+        }
+        Command::Stop {
+            interface,
+            pid,
+            force,
+        } => {
+            stop::stop(&interface, pid, force)?;
+        }
+        Command::Service {
+            scope,
+            name,
+            command,
+        } => {
+            handle_service_command(scope, name, command)?;
         }
         Command::Logout => {
             auth::logout()?;
@@ -191,25 +544,179 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> Result<()> {
+fn handle_service_command(
+    scope: service::ServiceScope,
+    name: String,
+    command: ServiceCommand,
+) -> Result<()> {
+    match command {
+        ServiceCommand::Install {
+            binary,
+            protocol,
+            interface,
+            no_dns,
+            skip_handshake_check,
+            config,
+            api_url,
+            user,
+            home,
+            svc_log_file,
+        } => {
+            let home = home.unwrap_or_else(default_home);
+            let user = user
+                .or_else(|| std::env::var("USER").ok())
+                .unwrap_or_default();
+            let log_file = svc_log_file.unwrap_or_else(|| {
+                home.join(".local")
+                    .join("state")
+                    .join("floppa-cli")
+                    .join("floppa-cli.log")
+            });
+            let binary = binary.unwrap_or_else(|| {
+                std::env::current_exe().unwrap_or_else(|_| PathBuf::from("floppa-cli"))
+            });
+            service::install(&service::ServiceInstallOptions {
+                scope,
+                name,
+                binary,
+                protocol: protocol.as_str().to_string(),
+                interface,
+                no_dns,
+                skip_handshake_check,
+                config: config.map(PathBuf::from),
+                api_url,
+                user,
+                home,
+                log_file,
+            })
+        }
+        ServiceCommand::Uninstall => {
+            service::uninstall(&service::ServiceUninstallOptions { scope, name })
+        }
+        ServiceCommand::Start => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Start,
+        }),
+        ServiceCommand::Stop => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Stop,
+        }),
+        ServiceCommand::Restart => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Restart,
+        }),
+        ServiceCommand::Status => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Status,
+        }),
+        ServiceCommand::Enable => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Enable,
+        }),
+        ServiceCommand::Disable => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Disable,
+        }),
+    }
+}
+
+fn default_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+struct CleanupKind {
+    dns: bool,
+    tunnel: CleanupTunnel,
+    cleaned: bool,
+}
+
+enum CleanupTunnel {
+    WireGuard(net::NetworkState),
+    Vless(net::NetworkState),
+}
+
+impl CleanupKind {
+    fn wireguard(state: net::NetworkState, dns: bool) -> Self {
+        Self {
+            dns,
+            tunnel: CleanupTunnel::WireGuard(state),
+            cleaned: false,
+        }
+    }
+
+    fn vless(state: net::NetworkState, dns: bool) -> Self {
+        Self {
+            dns,
+            tunnel: CleanupTunnel::Vless(state),
+            cleaned: false,
+        }
+    }
+
+    fn cleanup(&mut self) {
+        if self.cleaned {
+            return;
+        }
+        self.cleaned = true;
+        if self.dns
+            && let Err(e) = dns::restore_dns()
+        {
+            eprintln!("DNS restore failed: {e}");
+        }
+
+        let state = match &self.tunnel {
+            CleanupTunnel::WireGuard(s) => s,
+            CleanupTunnel::Vless(s) => s,
+        };
+        if let Err(e) = net::cleanup_networking(state) {
+            eprintln!("Tunnel cleanup failed: {e}");
+        }
+    }
+}
+
+impl Drop for CleanupKind {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
+async fn connect_wireguard(
+    config_str: &str,
+    interface: &str,
+    no_dns: bool,
+    skip_handshake_check: bool,
+) -> Result<()> {
     let wg_config = tunnel::WgConfig::from_config_str(config_str)?;
     eprintln!("Creating WireGuard tunnel on {interface}...");
     let device = tunnel::create_tunnel(&wg_config, interface).await?;
     eprintln!("Configuring networking...");
-    tunnel::configure_networking(&wg_config, interface).await?;
+    let network_state = tunnel::configure_networking(&wg_config, interface).await?;
+    net::verify_networking(&network_state)?;
 
+    let mut cleanup = CleanupKind::wireguard(network_state, !no_dns);
     if !no_dns {
-        dns::set_dns(&wg_config)?;
+        dns::set_dns(&wg_config, interface)?;
+    }
+
+    eprintln!("Waiting for WireGuard handshake...");
+    if !skip_handshake_check {
+        tunnel::verify_handshake(&device, 10).await?;
     }
 
     println!("READY");
-    eprintln!("Connected! Press Ctrl+C to disconnect.");
-    tokio::signal::ctrl_c().await?;
+    eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
+    wait_for_shutdown().await?;
 
     eprintln!("\nDisconnecting...");
-    if !no_dns {
-        dns::restore_dns()?;
-    }
+    cleanup.cleanup();
     device.stop().await;
     eprintln!("Disconnected.");
     Ok(())
@@ -225,27 +732,158 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
     let tunnel = vless::create_tunnel(&config, interface).await?;
 
     eprintln!("Configuring networking...");
-    vless::configure_networking(&config, interface).await?;
+    let network_state = vless::configure_networking(&config, interface).await?;
+    net::verify_networking(&network_state)?;
 
+    let mut cleanup = CleanupKind::vless(network_state, !no_dns);
     if !no_dns {
         // Write DNS servers from config
         if let Some(ref dns) = config.dns {
             let servers: Vec<String> = dns.split(',').map(|s| s.trim().to_string()).collect();
             if !servers.is_empty() {
-                dns::write_dns(&servers)?;
+                dns::write_dns(&servers, interface)?;
             }
         }
     }
 
+    eprintln!("Checking VLESS connectivity...");
+    if let Err(e) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect("1.1.1.1:80"),
+    )
+    .await
+    {
+        eprintln!("Warning: connectivity check failed ({e}) — tunnel may still work");
+    }
+
     println!("READY");
-    eprintln!("Connected! Press Ctrl+C to disconnect.");
-    tokio::signal::ctrl_c().await?;
+    eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
+    wait_for_shutdown().await?;
 
     eprintln!("\nDisconnecting...");
-    if !no_dns {
-        dns::restore_dns()?;
-    }
+    cleanup.cleanup();
     tunnel.stop().await.map_err(|e| anyhow::anyhow!("{e}"))?;
     eprintln!("Disconnected.");
     Ok(())
+}
+
+async fn wait_for_shutdown() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(SignalKind::terminate())?;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn is_network_error_true_for_connection_refused() {
+        let client = reqwest::Client::new();
+        let err = client.get("http://127.0.0.1:1/").send().await.unwrap_err();
+        assert!(is_network_error(&anyhow::Error::from(err)));
+    }
+
+    #[tokio::test]
+    async fn is_network_error_false_for_plain_anyhow() {
+        let err = anyhow::anyhow!("some application error");
+        assert!(!is_network_error(&err));
+    }
+
+    #[tokio::test]
+    async fn retry_succeeds_on_first_attempt() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok::<i32, anyhow::Error>(42)
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_succeeds_on_nth_attempt() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    let n = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n < 2 {
+                        Err::<i32, _>(anyhow::anyhow!("transient"))
+                    } else {
+                        Ok(99)
+                    }
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), 99);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_gives_up_after_all_delays_exhausted() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("always fails"))
+                }
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        // delays.len() + 1 = 3 + 1 = 4 total attempts
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn retry_stops_immediately_on_non_retryable_error() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| false,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("auth error"))
+                }
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 }

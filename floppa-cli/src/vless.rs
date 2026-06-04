@@ -1,7 +1,7 @@
+use crate::net::{NetworkState, get_default_gateway, run_ip};
 use anyhow::{Result, anyhow};
 use ipnetwork::IpNetwork;
 use shoes_lite::api::{VlessConfig, VlessTunnel};
-use std::process::Command;
 
 /// Parse a VLESS URI and create a VlessConfig with VPN defaults.
 pub fn parse_uri(uri: &str) -> Result<VlessConfig> {
@@ -31,72 +31,63 @@ pub async fn create_tunnel(config: &VlessConfig, interface: &str) -> Result<Vles
         .map_err(|e| anyhow!("{e}"))
 }
 
-fn run_ip(args: &[&str]) -> Result<()> {
-    let output = Command::new("ip").args(args).output()?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!("ip {} failed: {}", args.join(" "), stderr.trim()))
-    }
-}
-
-fn get_default_gateway() -> Result<Option<String>> {
-    let output = Command::new("ip")
-        .args(["route", "show", "default"])
-        .output()?;
-    let route_output = String::from_utf8_lossy(&output.stdout);
-    Ok(route_output
-        .split_whitespace()
-        .skip_while(|&w| w != "via")
-        .nth(1)
-        .map(|s| s.to_string()))
-}
-
 /// Configure routes for the VLESS tunnel (endpoint bypass + allowed IPs).
-pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Result<()> {
-    // Add host route for VLESS endpoint via default gateway to prevent routing loop
-    let endpoint_host = config
-        .server_addr
-        .split(':')
-        .next()
-        .unwrap_or(&config.server_addr);
-    let endpoint_ip: std::net::IpAddr = match endpoint_host.parse() {
-        Ok(ip) => ip,
-        Err(_) => {
-            // Resolve hostname
-            tokio::net::lookup_host(&config.server_addr)
+pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Result<NetworkState> {
+    // Resolve endpoint IP. server_addr is "host:port" which may be an IPv4 literal, an
+    // IPv6 bracket-literal ([::1]:443), or a hostname. Parse as SocketAddr first so
+    // bracket-literals don't produce a mangled host when split on ':'.
+    let endpoint_ip: std::net::IpAddr = match config.server_addr.parse::<std::net::SocketAddr>() {
+        Ok(sa) => sa.ip(),
+        Err(_) => match config.server_addr.parse::<std::net::IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => tokio::net::lookup_host(&config.server_addr)
                 .await?
                 .next()
                 .ok_or_else(|| anyhow!("Cannot resolve {}", config.server_addr))?
-                .ip()
-        }
+                .ip(),
+        },
     };
 
-    if let Some(gateway) = get_default_gateway()? {
-        let endpoint_route = format!("{endpoint_ip}/32");
-        run_ip(&["route", "replace", &endpoint_route, "via", &gateway])?;
-        eprintln!("Endpoint route: {endpoint_route} via {gateway}");
-    }
+    let endpoint_route = get_default_gateway()?
+        .map(|gateway| {
+            let prefix = if endpoint_ip.is_ipv4() { 32 } else { 128 };
+            let route = format!("{endpoint_ip}/{prefix}");
+            run_ip(&["route", "replace", &route, "via", &gateway])?;
+            eprintln!("Endpoint route: {route} via {gateway}");
+            Ok::<_, anyhow::Error>((route, gateway))
+        })
+        .transpose()?;
 
-    // Parse allowed IPs and add routes through TUN
+    // Parse allowed IPs and add routes through TUN. Use `replace` for idempotent restarts.
     let allowed_ips_str = config.allowed_ips.as_deref().unwrap_or("0.0.0.0/0, ::/0");
     let networks: Vec<IpNetwork> = allowed_ips_str
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
 
+    let mut added_routes = Vec::new();
     for network in &networks {
         if network.prefix() == 0 {
             if network.is_ipv4() {
                 run_ip(&["route", "replace", "0.0.0.0/1", "dev", interface])?;
                 run_ip(&["route", "replace", "128.0.0.0/1", "dev", interface])?;
+                added_routes.push("0.0.0.0/1".to_string());
+                added_routes.push("128.0.0.0/1".to_string());
             } else {
-                let _ = run_ip(&["route", "replace", "::/1", "dev", interface]);
-                let _ = run_ip(&["route", "replace", "8000::/1", "dev", interface]);
+                if let Err(e) = run_ip(&["route", "replace", "::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route ::/1: {e}");
+                } else {
+                    added_routes.push("::/1".to_string());
+                }
+                if let Err(e) = run_ip(&["route", "replace", "8000::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route 8000::/1: {e}");
+                } else {
+                    added_routes.push("8000::/1".to_string());
+                }
             }
         } else {
             run_ip(&["route", "replace", &network.to_string(), "dev", interface])?;
+            added_routes.push(network.to_string());
         }
     }
 
@@ -104,5 +95,10 @@ pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Resu
     eprintln!("VPN IP: {addr}");
     eprintln!("Endpoint: {}", config.server_addr);
 
-    Ok(())
+    Ok(NetworkState {
+        interface: interface.to_string(),
+        endpoint_route: endpoint_route.as_ref().map(|(route, _)| route.clone()),
+        endpoint_gateway: endpoint_route.as_ref().map(|(_, gateway)| gateway.clone()),
+        added_routes,
+    })
 }
