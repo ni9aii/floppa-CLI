@@ -1,5 +1,5 @@
-# Claude Code project instructions (contains server-specific details)
-CLAUDE.md
+# Track CLAUDE.md in this repo (overrides the global ~/.gitignore rule)
+!CLAUDE.md
 
 /target
 floppa-client/src-tauri/target

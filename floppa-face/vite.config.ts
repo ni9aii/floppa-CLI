@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vite-plus'
 import vue from '@vitejs/plugin-vue'
 import ui from '@nuxt/ui/vite'
 import vueDevTools from 'vite-plugin-vue-devtools'
@@ -20,7 +20,12 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // @nuxt/icon (pulled in by @nuxt/ui) imports this Nuxt-only virtual; provide a
+      // no-op stub so it resolves outside Nuxt. See the stub file for the full why.
+      '#build/nuxt-icon-client-bundle': fileURLToPath(
+        new URL('./src/nuxt-icon-client-bundle.ts', import.meta.url),
+      ),
     },
     dedupe: ['vue', 'pinia', 'vue-i18n', 'vue-router'],
   },

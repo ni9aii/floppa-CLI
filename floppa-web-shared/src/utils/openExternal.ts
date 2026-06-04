@@ -15,6 +15,6 @@ export function handleExternalLinkClick(event: MouseEvent) {
   const target = (event.target as HTMLElement).closest('a')
   if (target?.href) {
     event.preventDefault()
-    openExternal(target.href)
+    void openExternal(target.href)
   }
 }

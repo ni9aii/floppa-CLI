@@ -8,6 +8,7 @@ import { getAvatarsBatch } from '../../client/sdk.gen'
 import type { UserSummary } from '../../client/types.gen'
 import type { TableColumn } from '@nuxt/ui'
 import { formatDate } from '../../utils'
+import { useClientPagination } from '../../composables/adminList'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -29,16 +30,11 @@ const filteredUsers = computed(() => {
   )
 })
 
-// Client-side pagination (the list query returns all rows).
-const PAGE_SIZE = 100
-const page = ref(1)
-const paginatedUsers = computed(() =>
-  filteredUsers.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
-)
-// Reset to the first page whenever the filter changes.
-watch(search, () => {
-  page.value = 1
-})
+const {
+  page,
+  paginated: paginatedUsers,
+  pageSize: PAGE_SIZE,
+} = useClientPagination(filteredUsers, search)
 
 function displayName(u: UserSummary): string {
   if (u.first_name) return u.last_name ? `${u.first_name} ${u.last_name}` : u.first_name

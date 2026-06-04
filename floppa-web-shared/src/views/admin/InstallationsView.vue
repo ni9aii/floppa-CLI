@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation } from '@pinia/colada'
@@ -7,6 +7,7 @@ import { listInstallationsQuery, deleteInstallationMutation } from '../../client
 import type { InstallationSummary } from '../../client/types.gen'
 import { formatDateTime } from '../../utils'
 import type { TableColumn } from '@nuxt/ui'
+import { useClientPagination, useConfirmAction } from '../../composables/adminList'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -20,9 +21,12 @@ const {
 const deleteMut = useMutation(deleteInstallationMutation())
 const search = ref('')
 
-const confirmOpen = ref(false)
-const confirmMessage = ref('')
-const pendingId = ref<number | null>(null)
+const {
+  open: confirmOpen,
+  message: confirmMessage,
+  request: requestDelete,
+  confirm: runDelete,
+} = useConfirmAction()
 
 const filteredInstallations = computed(() => {
   if (!installations.value) return []
@@ -37,43 +41,34 @@ const filteredInstallations = computed(() => {
   )
 })
 
-// Client-side pagination (the list query returns all rows).
-const PAGE_SIZE = 100
-const page = ref(1)
-const paginatedInstallations = computed(() =>
-  filteredInstallations.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
-)
-watch(search, () => {
-  page.value = 1
-})
+const {
+  page,
+  paginated: paginatedInstallations,
+  pageSize: PAGE_SIZE,
+} = useClientPagination(filteredInstallations, search)
 
 function confirmDelete(id: number, deviceName: string | null | undefined) {
-  pendingId.value = id
-  confirmMessage.value = t('adminInstallations.deleteConfirm', {
-    device: deviceName || id,
-  })
-  confirmOpen.value = true
+  requestDelete(id, t('adminInstallations.deleteConfirm', { device: deviceName || id }))
 }
 
 async function doDelete() {
-  if (!pendingId.value) return
-  try {
-    await deleteMut.mutateAsync({ path: { id: pendingId.value } })
-    await refreshInstallations()
-    toast.add({
-      title: t('common.success'),
-      description: t('adminInstallations.deleted'),
-      color: 'success',
-    })
-  } catch (e) {
-    toast.add({
-      title: t('common.error'),
-      description: e instanceof Error ? e.message : t('adminInstallations.deleteFailed'),
-      color: 'error',
-    })
-  }
-  confirmOpen.value = false
-  pendingId.value = null
+  await runDelete(async (id) => {
+    try {
+      await deleteMut.mutateAsync({ path: { id } })
+      await refreshInstallations()
+      toast.add({
+        title: t('common.success'),
+        description: t('adminInstallations.deleted'),
+        color: 'success',
+      })
+    } catch (e) {
+      toast.add({
+        title: t('common.error'),
+        description: e instanceof Error ? e.message : t('adminInstallations.deleteFailed'),
+        color: 'error',
+      })
+    }
+  })
 }
 
 const columns = computed<TableColumn<InstallationSummary>[]>(() => [

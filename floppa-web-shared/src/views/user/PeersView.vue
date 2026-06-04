@@ -162,15 +162,6 @@ async function downloadConfig() {
   const { id, assigned_ip, config } = currentConfig.value
   const filename = `floppa-vpn-${assigned_ip}.conf`
 
-  console.info(
-    '[download] downloadConfig called, isMiniApp:',
-    isMiniApp,
-    '__TAURI_INTERNALS__:',
-    Boolean((window as unknown as Record<string, unknown>).__TAURI_INTERNALS__),
-    'userAgent:',
-    navigator.userAgent,
-  )
-
   if (isMiniApp) {
     try {
       await sendMyPeerConfig({ path: { id }, throwOnError: true })
@@ -186,18 +177,14 @@ async function downloadConfig() {
     try {
       if (navigator.userAgent.includes('Android')) {
         // Android: save to Download/FloppaVPN/ via MediaStore
-        console.info('[download] Android detected, using android-fs plugin')
         const { AndroidFs, AndroidPublicGeneralPurposeDir } =
           await import('tauri-plugin-android-fs-api')
-        console.info('[download] Creating public file...')
         const uri = await AndroidFs.createNewPublicFile(
           AndroidPublicGeneralPurposeDir.Download,
           `FloppaVPN/${filename}`,
           'text/plain',
         )
-        console.info('[download] File created, uri:', JSON.stringify(uri))
         await AndroidFs.writeTextFile(uri, config)
-        console.info('[download] File written successfully')
         toast.add({
           title: t('userPeers.configSaved', { path: `Download/FloppaVPN/${filename}` }),
           color: 'success',

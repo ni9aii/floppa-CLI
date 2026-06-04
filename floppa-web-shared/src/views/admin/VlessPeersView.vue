@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation } from '@pinia/colada'
@@ -10,6 +10,7 @@ import {
 import type { VlessPeerSummary } from '../../client/types.gen'
 import { formatBytes } from '../../utils'
 import type { TableColumn } from '@nuxt/ui'
+import { useClientPagination, useConfirmAction } from '../../composables/adminList'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -18,9 +19,12 @@ const { data: peers, status, error, refresh: refreshPeers } = useQuery(listVless
 const regenerateMut = useMutation(regenerateAdminVlessConfigMutation())
 const search = ref('')
 
-const confirmOpen = ref(false)
-const confirmUsername = ref('')
-const pendingUserId = ref<number | null>(null)
+const {
+  open: confirmOpen,
+  message: confirmUsername,
+  request: requestRegenerate,
+  confirm: runRegenerate,
+} = useConfirmAction()
 
 const filteredPeers = computed(() => {
   if (!peers.value) return []
@@ -34,41 +38,34 @@ const filteredPeers = computed(() => {
   )
 })
 
-// Client-side pagination (the list query returns all rows).
-const PAGE_SIZE = 100
-const page = ref(1)
-const paginatedPeers = computed(() =>
-  filteredPeers.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
-)
-watch(search, () => {
-  page.value = 1
-})
+const {
+  page,
+  paginated: paginatedPeers,
+  pageSize: PAGE_SIZE,
+} = useClientPagination(filteredPeers, search)
 
 function confirmRegenerate(userId: number, username: string | null | undefined) {
-  pendingUserId.value = userId
-  confirmUsername.value = username || '-'
-  confirmOpen.value = true
+  requestRegenerate(userId, username || '-')
 }
 
 async function doRegenerate() {
-  if (!pendingUserId.value) return
-  try {
-    await regenerateMut.mutateAsync({ path: { id: pendingUserId.value } })
-    await refreshPeers()
-    toast.add({
-      title: t('common.success'),
-      description: t('adminVless.regenerated'),
-      color: 'success',
-    })
-  } catch (e) {
-    toast.add({
-      title: t('common.error'),
-      description: e instanceof Error ? e.message : t('adminVless.regenerateFailed'),
-      color: 'error',
-    })
-  }
-  confirmOpen.value = false
-  pendingUserId.value = null
+  await runRegenerate(async (id) => {
+    try {
+      await regenerateMut.mutateAsync({ path: { id } })
+      await refreshPeers()
+      toast.add({
+        title: t('common.success'),
+        description: t('adminVless.regenerated'),
+        color: 'success',
+      })
+    } catch (e) {
+      toast.add({
+        title: t('common.error'),
+        description: e instanceof Error ? e.message : t('adminVless.regenerateFailed'),
+        color: 'error',
+      })
+    }
+  })
 }
 
 const columns = computed<TableColumn<VlessPeerSummary>[]>(() => [

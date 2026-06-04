@@ -501,7 +501,7 @@ function selectMode(mode: SplitMode) {
           />
         </div>
 
-        <UDivider class="my-1" />
+        <USeparator class="my-1" />
 
         <button
           class="flex items-center gap-2 text-sm text-[var(--ui-text-muted)] cursor-pointer"
@@ -556,7 +556,7 @@ function selectMode(mode: SplitMode) {
           />
         </div>
 
-        <UDivider class="my-1" />
+        <USeparator class="my-1" />
 
         <div class="flex items-center justify-between gap-4">
           <div>

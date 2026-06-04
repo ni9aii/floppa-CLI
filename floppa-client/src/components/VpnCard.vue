@@ -152,8 +152,9 @@ async function doServerSync(): Promise<SyncResult> {
     // 2. Also provision the secondary wg-family protocol when the server offers it. A device is a
     //    single peer-limit slot, so holding both WireGuard and AmneziaWG is free — this gives the
     //    user all switcher positions. Best-effort: don't fail the sync if the bonus peer can't be made.
-    const secondaryAvailable = secondary === 'wireguard' || amneziaAvailable
-    await syncWgFamilyPeer(secondary, secondaryAvailable)
+    // The secondary wg protocol is only ever available when AmneziaWG is offered: if it isn't,
+    // the primary is WireGuard and the secondary would be the absent AmneziaWG.
+    await syncWgFamilyPeer(secondary, amneziaAvailable)
 
     // 3. Fetch VLESS config (per-user, no peer slot)
     try {

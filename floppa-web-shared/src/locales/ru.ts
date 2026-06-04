@@ -274,6 +274,7 @@ export default {
     deviceId: 'ID устройства: {id}',
     source: 'Источник',
     sourceTrial: 'Пробный',
+    sourceTaster: 'Тестовый',
     sourcePurchase: 'Покупка',
     sourceAdminGrant: 'Админ',
   },

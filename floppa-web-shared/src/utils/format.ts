@@ -5,7 +5,8 @@ export function formatBytes(bytes: number, decimals = 2): string {
   if (bytes === 0) return '0 B'
   const k = 1024
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  // Clamp so huge (>= 1 EB) or fractional (< 1 B) inputs never index out of `sizes` ("1 undefined").
+  const i = Math.min(Math.max(Math.floor(Math.log(bytes) / Math.log(k)), 0), sizes.length - 1)
   return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i]
 }
 
@@ -16,7 +17,11 @@ export function formatSpeed(bytesPerSecond: number, decimals = 1): string {
   if (bytesPerSecond === 0) return '0 B/s'
   const k = 1024
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-  const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k))
+  // Clamp so >= 1 TB/s (or fractional) inputs never index out of `sizes` ("… undefined").
+  const i = Math.min(
+    Math.max(Math.floor(Math.log(bytesPerSecond) / Math.log(k)), 0),
+    sizes.length - 1,
+  )
   return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(decimals)) + ' ' + sizes[i]
 }
 
@@ -34,25 +39,6 @@ export function formatDate(date: string | Date): string {
 export function formatDateTime(date: string | Date): string {
   const d = typeof date === 'string' ? new Date(date) : date
   return d.toLocaleString()
-}
-
-/**
- * Format date to relative time (e.g., "2 hours ago")
- */
-export function formatRelativeTime(date: string | Date): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffSec = Math.floor(diffMs / 1000)
-  const diffMin = Math.floor(diffSec / 60)
-  const diffHour = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHour / 24)
-
-  if (diffSec < 60) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  if (diffHour < 24) return `${diffHour}h ago`
-  if (diffDay < 30) return `${diffDay}d ago`
-  return formatDate(d)
 }
 
 /**
