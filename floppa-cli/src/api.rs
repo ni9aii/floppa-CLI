@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::{fs, path::PathBuf};
 
 pub struct ApiClient {
     client: reqwest::Client,
@@ -40,6 +41,12 @@ pub struct MyPeer {
 
 fn default_protocol() -> String {
     "wireguard".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeviceIdentity {
+    device_id: String,
+    device_name: String,
 }
 
 /// `GET /me/peers` returns an object wrapping the peer list (not a bare array).
@@ -100,6 +107,40 @@ impl ApiClient {
         format!("{}{}", self.base_url, path)
     }
 
+    pub async fn get_peer_by_device(
+        &self,
+        device_id: &str,
+        protocol: &str,
+    ) -> Result<Option<MyPeer>> {
+        let resp = self
+            .client
+            .get(format!(
+                "{}?protocol={}",
+                self.url(&format!("/me/peers/by-device/{device_id}")),
+                protocol
+            ))
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+
+        if resp.status() == 401 {
+            bail!("Authentication failed. Run `floppa-cli login` again.");
+        }
+        if resp.status() == 404 {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            bail!(
+                "GET /me/peers/by-device/{device_id} failed: {}",
+                resp.status()
+            );
+        }
+
+        resp.json()
+            .await
+            .context("Failed to parse peer-by-device response")
+    }
+
     pub async fn get_me(&self) -> Result<MeResponse> {
         let resp = self
             .client
@@ -144,6 +185,7 @@ impl ApiClient {
     pub async fn create_peer(
         &self,
         device_name: Option<String>,
+        device_id: Option<String>,
         protocol: Option<&str>,
     ) -> Result<CreatePeerResponse> {
         let resp = self
@@ -152,7 +194,7 @@ impl ApiClient {
             .bearer_auth(&self.token)
             .json(&CreatePeerRequest {
                 device_name,
-                device_id: None,
+                device_id,
                 protocol: protocol.map(|p| p.to_string()),
             })
             .send()
@@ -190,22 +232,40 @@ impl ApiClient {
 
     /// Find an existing active peer for `protocol` ("wireguard" | "amneziawg"), or create one.
     pub async fn find_or_create_peer(&self, protocol: &str) -> Result<String> {
-        let peers = self.list_peers().await?;
+        let identity = get_or_create_device_identity()?;
 
-        let active = peers
-            .iter()
-            .find(|p| p.sync_status == "active" && p.protocol == protocol);
-
-        let peer_id = if let Some(peer) = active {
+        if let Some(peer) = self
+            .get_peer_by_device(&identity.device_id, protocol)
+            .await?
+        {
             eprintln!(
-                "Using existing {protocol} peer: {} ({})",
-                peer.assigned_ip, peer.id
+                "Using existing {protocol} peer for device {}: {} ({})",
+                identity.device_id, peer.assigned_ip, peer.id
+            );
+            return self.get_peer_config(peer.id).await;
+        }
+
+        let peers = self.list_peers().await?;
+        let peer_id = if let Some(peer) = peers.iter().find(|p| {
+            p.device_id.as_deref() == Some(identity.device_id.as_str()) && p.protocol == protocol
+        }) {
+            eprintln!(
+                "Using existing {protocol} peer for device {}: {} ({})",
+                identity.device_id, peer.assigned_ip, peer.id
             );
             peer.id
         } else {
-            let hostname = hostname();
-            eprintln!("Creating new {protocol} peer (device: {hostname})...");
-            let created = self.create_peer(Some(hostname), Some(protocol)).await?;
+            eprintln!(
+                "Creating new {protocol} peer (device_id: {}, device: {})...",
+                identity.device_id, identity.device_name
+            );
+            let created = self
+                .create_peer(
+                    Some(identity.device_name),
+                    Some(identity.device_id),
+                    Some(protocol),
+                )
+                .await?;
             eprintln!("Peer created: {} ({})", created.assigned_ip, created.id);
             return Ok(created.config);
         };
@@ -267,8 +327,45 @@ impl ApiClient {
     }
 }
 
+fn config_dir() -> Result<PathBuf> {
+    let dir = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::config_dir().map(|p| p.join("floppa-cli")))
+        .context("Failed to locate config directory")?;
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn get_or_create_device_identity() -> Result<DeviceIdentity> {
+    let path = config_dir()?.join("device.json");
+    if let Ok(raw) = fs::read_to_string(&path) {
+        let identity: DeviceIdentity = serde_json::from_str(&raw)
+            .with_context(|| format!("Failed to parse device identity file: {}", path.display()))?;
+        if !identity.device_id.is_empty() && !identity.device_name.is_empty() {
+            return Ok(identity);
+        }
+    }
+
+    let identity = DeviceIdentity {
+        device_id: random_device_id(),
+        device_name: hostname(),
+    };
+    let raw = serde_json::to_string_pretty(&identity)?;
+    fs::write(&path, raw).with_context(|| format!("Failed to write {}", path.display()))?;
+    eprintln!("Created device identity: {}", identity.device_id);
+    Ok(identity)
+}
+
+fn random_device_id() -> String {
+    rand::random::<u128>()
+        .to_be_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 fn hostname() -> String {
     std::env::var("HOSTNAME")
-        .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
+        .or_else(|_| fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
         .unwrap_or_else(|_| "floppa-cli".to_string())
 }
