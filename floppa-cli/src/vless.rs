@@ -1,7 +1,14 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use ipnetwork::IpNetwork;
 use shoes_lite::api::{VlessConfig, VlessTunnel};
 use std::process::Command;
+
+#[derive(Debug, Clone)]
+pub struct NetworkState {
+    pub interface: String,
+    pub endpoint_route: Option<String>,
+    pub endpoint_gateway: Option<String>,
+}
 
 /// Parse a VLESS URI and create a VlessConfig with VPN defaults.
 pub fn parse_uri(uri: &str) -> Result<VlessConfig> {
@@ -54,7 +61,7 @@ fn get_default_gateway() -> Result<Option<String>> {
 }
 
 /// Configure routes for the VLESS tunnel (endpoint bypass + allowed IPs).
-pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Result<()> {
+pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Result<NetworkState> {
     // Add host route for VLESS endpoint via default gateway to prevent routing loop
     let endpoint_host = config
         .server_addr
@@ -73,13 +80,16 @@ pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Resu
         }
     };
 
-    if let Some(gateway) = get_default_gateway()? {
-        let endpoint_route = format!("{endpoint_ip}/32");
-        run_ip(&["route", "replace", &endpoint_route, "via", &gateway])?;
-        eprintln!("Endpoint route: {endpoint_route} via {gateway}");
-    }
+    let endpoint_route = get_default_gateway()?
+        .map(|gateway| {
+            let route = format!("{endpoint_ip}/32");
+            run_ip(&["route", "replace", &route, "via", &gateway])?;
+            eprintln!("Endpoint route: {route} via {gateway}");
+            Ok::<_, anyhow::Error>((route, gateway))
+        })
+        .transpose()?;
 
-    // Parse allowed IPs and add routes through TUN
+    // Parse allowed IPs and add routes through TUN. Use `replace` for idempotent restarts.
     let allowed_ips_str = config.allowed_ips.as_deref().unwrap_or("0.0.0.0/0, ::/0");
     let networks: Vec<IpNetwork> = allowed_ips_str
         .split(',')
@@ -92,8 +102,12 @@ pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Resu
                 run_ip(&["route", "replace", "0.0.0.0/1", "dev", interface])?;
                 run_ip(&["route", "replace", "128.0.0.0/1", "dev", interface])?;
             } else {
-                let _ = run_ip(&["route", "replace", "::/1", "dev", interface]);
-                let _ = run_ip(&["route", "replace", "8000::/1", "dev", interface]);
+                if let Err(e) = run_ip(&["route", "replace", "::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route ::/1: {e}");
+                }
+                if let Err(e) = run_ip(&["route", "replace", "8000::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route 8000::/1: {e}");
+                }
             }
         } else {
             run_ip(&["route", "replace", &network.to_string(), "dev", interface])?;
@@ -104,5 +118,55 @@ pub async fn configure_networking(config: &VlessConfig, interface: &str) -> Resu
     eprintln!("VPN IP: {addr}");
     eprintln!("Endpoint: {}", config.server_addr);
 
+    Ok(NetworkState {
+        interface: interface.to_string(),
+        endpoint_route: endpoint_route.as_ref().map(|(route, _)| route.clone()),
+        endpoint_gateway: endpoint_route.as_ref().map(|(_, gateway)| gateway.clone()),
+    })
+}
+
+pub fn cleanup_networking(state: &NetworkState) -> Result<()> {
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
+        run_ip_quiet(&["route", "del", route, "via", gateway]);
+    }
+
+    for route in ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"] {
+        run_ip_quiet(&["route", "del", route, "dev", &state.interface]);
+    }
+    run_ip_quiet(&["link", "del", &state.interface]);
     Ok(())
+}
+
+pub fn verify_networking(state: &NetworkState) -> Result<()> {
+    if !route_exists(&["link", "show", &state.interface]) {
+        bail!("VPN interface {} is not up", state.interface);
+    }
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
+        if !route_exists(&["route", "show", route]) {
+            bail!("Endpoint route {route} via {gateway} is missing");
+        }
+    }
+    if !route_exists(&["route", "show", "0.0.0.0/1"])
+        || !route_exists(&["route", "show", "128.0.0.0/1"])
+    {
+        bail!(
+            "Default VPN split routes are missing on {}",
+            state.interface
+        );
+    }
+    Ok(())
+}
+
+fn run_ip_quiet(args: &[&str]) -> bool {
+    Command::new("ip")
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn route_exists(args: &[&str]) -> bool {
+    Command::new("ip")
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
 }

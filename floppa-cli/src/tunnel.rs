@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
 use gotatun::tun::tun_async_device::TunDevice;
@@ -12,6 +12,13 @@ use std::str::FromStr;
 pub const DEFAULT_INTERFACE_NAME: &str = "floppa0";
 
 pub type FloppaDevice = Device<(UdpSocketFactory, TunDevice, TunDevice)>;
+
+#[derive(Debug, Clone)]
+pub struct NetworkState {
+    pub interface: String,
+    pub endpoint_route: Option<String>,
+    pub endpoint_gateway: Option<String>,
+}
 
 /// AmneziaWG 2.0 obfuscation params parsed from an AmneziaWG `.conf` `[Interface]`.
 #[derive(Default)]
@@ -319,33 +326,41 @@ fn get_default_gateway() -> Result<Option<String>> {
         .map(|s| s.to_string()))
 }
 
-pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<()> {
+pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<NetworkState> {
     let addr = config.address_network()?;
 
     run_ip(&["addr", "add", &addr.to_string(), "dev", interface])?;
     run_ip(&["link", "set", interface, "mtu", &config.mtu().to_string()])?;
     run_ip(&["link", "set", interface, "up"])?;
 
-    // Add host route for WG endpoint via default gateway to prevent routing loop
+    // Add host route for WG endpoint via default gateway to prevent routing loop.
+    // Use `replace` so repeated starts after a crash are idempotent.
     let endpoint = config.peer_socket_addr().await?;
-    if let Some(gateway) = get_default_gateway()? {
-        let endpoint_route = format!("{}/32", endpoint.ip());
-        run_ip(&["route", "add", &endpoint_route, "via", &gateway])?;
-        eprintln!("Endpoint route: {} via {}", endpoint_route, gateway);
-    }
+    let endpoint_route = get_default_gateway()?
+        .map(|gateway| {
+            let route = format!("{}/32", endpoint.ip());
+            run_ip(&["route", "replace", &route, "via", &gateway])?;
+            eprintln!("Endpoint route: {route} via {gateway}");
+            Ok::<_, anyhow::Error>((route, gateway))
+        })
+        .transpose()?;
 
-    // Add routes for allowed IPs
+    // Add routes for allowed IPs. Use `replace` for idempotent restarts.
     for network in config.allowed_ips_networks() {
         if network.prefix() == 0 {
             if network.is_ipv4() {
-                run_ip(&["route", "add", "0.0.0.0/1", "dev", interface])?;
-                run_ip(&["route", "add", "128.0.0.0/1", "dev", interface])?;
+                run_ip(&["route", "replace", "0.0.0.0/1", "dev", interface])?;
+                run_ip(&["route", "replace", "128.0.0.0/1", "dev", interface])?;
             } else {
-                let _ = run_ip(&["route", "add", "::/1", "dev", interface]);
-                let _ = run_ip(&["route", "add", "8000::/1", "dev", interface]);
+                if let Err(e) = run_ip(&["route", "replace", "::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route ::/1: {e}");
+                }
+                if let Err(e) = run_ip(&["route", "replace", "8000::/1", "dev", interface]) {
+                    eprintln!("Skipping IPv6 VPN route 8000::/1: {e}");
+                }
             }
         } else {
-            run_ip(&["route", "add", &network.to_string(), "dev", interface])?;
+            run_ip(&["route", "replace", &network.to_string(), "dev", interface])?;
         }
     }
 
@@ -353,7 +368,70 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
     eprintln!("VPN IP: {ip}");
     eprintln!("Endpoint: {}", config.peer_endpoint);
 
+    Ok(NetworkState {
+        interface: interface.to_string(),
+        endpoint_route: endpoint_route.as_ref().map(|(route, _)| route.clone()),
+        endpoint_gateway: endpoint_route.as_ref().map(|(_, gateway)| gateway.clone()),
+    })
+}
+
+pub fn cleanup_networking(state: &NetworkState) -> Result<()> {
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
+        run_ip_quiet(&["route", "del", route, "via", gateway]);
+    }
+
+    for route in ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"] {
+        run_ip_quiet(&["route", "del", route, "dev", &state.interface]);
+    }
+    run_ip_quiet(&["link", "del", &state.interface]);
     Ok(())
+}
+
+pub fn verify_networking(state: &NetworkState) -> Result<()> {
+    if !route_exists(&["link", "show", &state.interface]) {
+        bail!("VPN interface {} is not up", state.interface);
+    }
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
+        if !route_exists(&["route", "show", route]) {
+            bail!("Endpoint route {route} via {gateway} is missing");
+        }
+    }
+    if !route_exists(&["route", "show", "0.0.0.0/1"])
+        || !route_exists(&["route", "show", "128.0.0.0/1"])
+    {
+        bail!(
+            "Default VPN split routes are missing on {}",
+            state.interface
+        );
+    }
+    Ok(())
+}
+
+pub fn status(interface: &str) -> Result<()> {
+    if !route_exists(&["link", "show", interface]) {
+        bail!("Floppa {interface}: not connected");
+    }
+    if !route_exists(&["route", "show", "0.0.0.0/1"])
+        || !route_exists(&["route", "show", "128.0.0.0/1"])
+    {
+        bail!("Floppa {interface}: interface exists, but VPN routes are missing");
+    }
+    println!("Floppa {interface}: connected");
+    Ok(())
+}
+
+fn run_ip_quiet(args: &[&str]) -> bool {
+    Command::new("ip")
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn route_exists(args: &[&str]) -> bool {
+    Command::new("ip")
+        .args(args)
+        .output()
+        .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
 }
 
 pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaDevice> {
