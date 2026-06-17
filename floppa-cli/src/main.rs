@@ -51,6 +51,21 @@ enum Command {
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
+    /// Manage peers: delete stale or device-specific peers
+    Peer {
+        #[command(subcommand)]
+        command: PeerCommand,
+    },
+    /// Manage VLESS config
+    Vless {
+        #[command(subcommand)]
+        command: VlessCommand,
+    },
+    /// Manage local CLI device identity
+    Device {
+        #[command(subcommand)]
+        command: DeviceCommand,
+    },
     /// Fetch and print config (WireGuard/AmneziaWG .conf or VLESS URI)
     Config {
         /// Protocol: wireguard (default), amneziawg, or vless
@@ -70,6 +85,41 @@ enum Command {
     },
     /// Remove saved login token
     Logout,
+}
+
+#[derive(Subcommand)]
+enum PeerCommand {
+    /// Delete one peer, all peers for this device/protocol, or all peers
+    Delete {
+        /// Exact peer ID to delete
+        #[arg(long)]
+        peer_id: Option<i64>,
+        /// Delete all active peers for this protocol and this CLI device
+        #[arg(long)]
+        protocol: Option<String>,
+        /// Delete all peers for the current account. Use with care.
+        #[arg(long)]
+        all: bool,
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum VlessCommand {
+    /// Regenerate VLESS UUID and print the new URI
+    Regenerate {
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceCommand {
+    /// Print local device_id/device_name
+    Show,
+    /// Generate a new local device identity
+    Reset,
 }
 
 fn is_vless(config_str: &str) -> bool {
@@ -160,17 +210,102 @@ async fn main() -> Result<()> {
             if peers.is_empty() {
                 eprintln!("No peers found.");
             } else {
-                println!("{:<6} {:<18} {:<14} Device", "ID", "IP", "Status");
+                println!(
+                    "{:<6} {:<18} {:<14} {:<32} Device",
+                    "ID", "IP", "Status", "Device ID"
+                );
                 for p in &peers {
                     println!(
-                        "{:<6} {:<18} {:<14} {}",
+                        "{:<6} {:<18} {:<14} {:<32} {}",
                         p.id,
                         p.assigned_ip,
                         p.sync_status,
+                        p.device_id.as_deref().unwrap_or("-"),
                         p.device_name.as_deref().unwrap_or("-")
                     );
                 }
             }
+        }
+        Command::Peer {
+            command:
+                PeerCommand::Delete {
+                    peer_id,
+                    protocol,
+                    all,
+                    api_url,
+                },
+        } => {
+            let token =
+                auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+            let client = api::ApiClient::new(&api_url, &token);
+
+            let identity = if protocol.is_some() || all {
+                Some(api::get_or_create_device_identity()?)
+            } else {
+                None
+            };
+            let peers = if protocol.is_some() || all {
+                Some(client.list_peers().await?)
+            } else {
+                None
+            };
+
+            let mut ids = Vec::new();
+            if let Some(id) = peer_id {
+                ids.push(id);
+            } else if let Some(protocol) = protocol {
+                let identity = identity.as_ref().expect("identity loaded above");
+                ids.extend(
+                    peers
+                        .as_ref()
+                        .expect("peers loaded above")
+                        .iter()
+                        .filter(|p| {
+                            p.protocol == protocol
+                                && p.device_id.as_deref() == Some(identity.device_id.as_str())
+                        })
+                        .map(|p| p.id),
+                );
+            } else if all {
+                ids.extend(
+                    peers
+                        .as_ref()
+                        .expect("peers loaded above")
+                        .iter()
+                        .map(|p| p.id),
+                );
+            } else {
+                bail!("Provide --peer-id, --protocol, or --all");
+            }
+
+            if ids.is_empty() {
+                eprintln!("No matching peers found.");
+            }
+            for id in ids {
+                client.delete_peer(id).await?;
+                println!("Deleted peer {id}.");
+            }
+        }
+        Command::Vless {
+            command: VlessCommand::Regenerate { api_url },
+        } => {
+            let token =
+                auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+            let client = api::ApiClient::new(&api_url, &token);
+            let uri = client.regenerate_vless_config().await?;
+            println!("{uri}");
+        }
+        Command::Device {
+            command: DeviceCommand::Show,
+        } => {
+            let identity = api::get_or_create_device_identity()?;
+            println!("{}", serde_json::to_string_pretty(&identity)?);
+        }
+        Command::Device {
+            command: DeviceCommand::Reset,
+        } => {
+            let identity = api::reset_device_identity()?;
+            println!("{}", serde_json::to_string_pretty(&identity)?);
         }
         Command::Config {
             protocol,
