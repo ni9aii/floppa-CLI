@@ -6,6 +6,8 @@ mod vless;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+#[cfg(unix)]
+use tokio::signal::unix::SignalKind;
 
 const DEFAULT_API_URL: &str = "https://floppa.okhsunrog.dev/api";
 
@@ -59,6 +61,12 @@ enum Command {
         peer_id: Option<i64>,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
+    },
+    /// Show local tunnel status without contacting the API
+    Status {
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
     },
     /// Remove saved login token
     Logout,
@@ -182,6 +190,9 @@ async fn main() -> Result<()> {
             };
             print!("{config}");
         }
+        Command::Status { interface } => {
+            tunnel::status(&interface)?;
+        }
         Command::Logout => {
             auth::logout()?;
             eprintln!("Logged out.");
@@ -191,25 +202,72 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+struct CleanupKind {
+    dns: bool,
+    tunnel: CleanupTunnel,
+}
+
+enum CleanupTunnel {
+    WireGuard(tunnel::NetworkState),
+    Vless(vless::NetworkState),
+}
+
+impl CleanupKind {
+    fn wireguard(state: tunnel::NetworkState, dns: bool) -> Self {
+        Self {
+            dns,
+            tunnel: CleanupTunnel::WireGuard(state),
+        }
+    }
+
+    fn vless(state: vless::NetworkState, dns: bool) -> Self {
+        Self {
+            dns,
+            tunnel: CleanupTunnel::Vless(state),
+        }
+    }
+
+    fn cleanup(&mut self) {
+        if self.dns {
+            if let Err(e) = dns::restore_dns() {
+                eprintln!("DNS restore failed: {e}");
+            }
+        }
+
+        match &self.tunnel {
+            CleanupTunnel::WireGuard(state) => {
+                if let Err(e) = tunnel::cleanup_networking(state) {
+                    eprintln!("Tunnel cleanup failed: {e}");
+                }
+            }
+            CleanupTunnel::Vless(state) => {
+                if let Err(e) = vless::cleanup_networking(state) {
+                    eprintln!("VLESS cleanup failed: {e}");
+                }
+            }
+        }
+    }
+}
+
 async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> Result<()> {
     let wg_config = tunnel::WgConfig::from_config_str(config_str)?;
     eprintln!("Creating WireGuard tunnel on {interface}...");
     let device = tunnel::create_tunnel(&wg_config, interface).await?;
     eprintln!("Configuring networking...");
-    tunnel::configure_networking(&wg_config, interface).await?;
+    let network_state = tunnel::configure_networking(&wg_config, interface).await?;
+    tunnel::verify_networking(&network_state)?;
 
+    let mut cleanup = CleanupKind::wireguard(network_state, !no_dns);
     if !no_dns {
         dns::set_dns(&wg_config)?;
     }
 
     println!("READY");
-    eprintln!("Connected! Press Ctrl+C to disconnect.");
-    tokio::signal::ctrl_c().await?;
+    eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
+    wait_for_shutdown().await?;
 
     eprintln!("\nDisconnecting...");
-    if !no_dns {
-        dns::restore_dns()?;
-    }
+    cleanup.cleanup();
     device.stop().await;
     eprintln!("Disconnected.");
     Ok(())
@@ -225,8 +283,10 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
     let tunnel = vless::create_tunnel(&config, interface).await?;
 
     eprintln!("Configuring networking...");
-    vless::configure_networking(&config, interface).await?;
+    let network_state = vless::configure_networking(&config, interface).await?;
+    vless::verify_networking(&network_state)?;
 
+    let mut cleanup = CleanupKind::vless(network_state, !no_dns);
     if !no_dns {
         // Write DNS servers from config
         if let Some(ref dns) = config.dns {
@@ -238,14 +298,30 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
     }
 
     println!("READY");
-    eprintln!("Connected! Press Ctrl+C to disconnect.");
-    tokio::signal::ctrl_c().await?;
+    eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
+    wait_for_shutdown().await?;
 
     eprintln!("\nDisconnecting...");
-    if !no_dns {
-        dns::restore_dns()?;
-    }
+    cleanup.cleanup();
     tunnel.stop().await.map_err(|e| anyhow::anyhow!("{e}"))?;
     eprintln!("Disconnected.");
+    Ok(())
+}
+
+async fn wait_for_shutdown() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate = tokio::signal::unix::signal(SignalKind::terminate())?;
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+    }
+
     Ok(())
 }
