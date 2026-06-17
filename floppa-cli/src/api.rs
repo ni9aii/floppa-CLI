@@ -44,9 +44,9 @@ fn default_protocol() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DeviceIdentity {
-    device_id: String,
-    device_name: String,
+pub struct DeviceIdentity {
+    pub device_id: String,
+    pub device_name: String,
 }
 
 /// `GET /me/peers` returns an object wrapping the peer list (not a bare array).
@@ -230,6 +230,48 @@ impl ApiClient {
         resp.text().await.context("Failed to read config response")
     }
 
+    pub async fn delete_peer(&self, peer_id: i64) -> Result<()> {
+        let resp = self
+            .client
+            .delete(self.url(&format!("/me/peers/{peer_id}")))
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+
+        if resp.status() == 401 {
+            bail!("Authentication failed. Run `floppa-cli login` again.");
+        }
+        if resp.status() == 404 {
+            bail!("Peer {peer_id} not found.");
+        }
+        if !resp.status().is_success() {
+            bail!("DELETE /me/peers/{peer_id} failed: {}", resp.status());
+        }
+        Ok(())
+    }
+
+    pub async fn regenerate_vless_config(&self) -> Result<String> {
+        let resp = self
+            .client
+            .post(self.url("/me/vless-config/regenerate"))
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+
+        if resp.status() == 401 {
+            bail!("Authentication failed. Run `floppa-cli login` again.");
+        }
+        if !resp.status().is_success() {
+            bail!("POST /me/vless-config/regenerate failed: {}", resp.status());
+        }
+
+        let vless: VlessConfigResponse = resp
+            .json()
+            .await
+            .context("Failed to parse regenerated VLESS config response")?;
+        Ok(vless.uri)
+    }
+
     /// Find an existing active peer for `protocol` ("wireguard" | "amneziawg"), or create one.
     pub async fn find_or_create_peer(&self, protocol: &str) -> Result<String> {
         let identity = get_or_create_device_identity()?;
@@ -336,7 +378,7 @@ fn config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn get_or_create_device_identity() -> Result<DeviceIdentity> {
+pub fn get_or_create_device_identity() -> Result<DeviceIdentity> {
     let path = config_dir()?.join("device.json");
     if let Ok(raw) = fs::read_to_string(&path) {
         let identity: DeviceIdentity = serde_json::from_str(&raw)
@@ -353,6 +395,18 @@ fn get_or_create_device_identity() -> Result<DeviceIdentity> {
     let raw = serde_json::to_string_pretty(&identity)?;
     fs::write(&path, raw).with_context(|| format!("Failed to write {}", path.display()))?;
     eprintln!("Created device identity: {}", identity.device_id);
+    Ok(identity)
+}
+
+pub fn reset_device_identity() -> Result<DeviceIdentity> {
+    let path = config_dir()?.join("device.json");
+    let identity = DeviceIdentity {
+        device_id: random_device_id(),
+        device_name: hostname(),
+    };
+    let raw = serde_json::to_string_pretty(&identity)?;
+    fs::write(&path, raw).with_context(|| format!("Failed to write {}", path.display()))?;
+    eprintln!("Reset device identity: {}", identity.device_id);
     Ok(identity)
 }
 
