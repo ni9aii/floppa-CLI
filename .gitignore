@@ -1,57 +1,26 @@
-# Track CLAUDE.md in this repo (overrides the global ~/.gitignore rule)
-!CLAUDE.md
-
 /target
-floppa-client/src-tauri/target
-tauri-plugin-vpn/target
 release/
-release-vless/
-floppa-vpn-release.tar.gz
-floppa-vless-release.tar.gz
+*.tar.gz
 
-# Python
-__pycache__/
-.venv/
+# Secrets/configs
+.env
+config.local.toml
+config.staging.toml
+config.prod.toml
 
 # Test artifacts
 test-results/
+.venv/
+__pycache__/
 
-# Integration test secrets (WireGuard configs with private keys)
-tests/integration/.secrets/
-tests/integration/.env
-
-# Config files with secrets (use config.example.toml as template)
-config.staging.toml
-config.prod.toml
-config.local.toml
-
-# Environment files (use .env.example as template)
-.env
-
-# Node.js
+# Node build output if local docs/scripts are added later
 node_modules/
 dist/
 *.tsbuildinfo
 
-# Auto-generated type declarations (Nuxt UI unplugin)
-auto-imports.d.ts
-components.d.ts
-
-# IDE
+# IDE/OS
 .idea/
-
-# Tool cache (ktfmt JAR etc.)
-.cache/
-
-# ESLint/Prettier cache
-.eslintcache
-node_modules/.cache/
-
-# makepkg (Arch packaging)
-scripts/arch/src/
-scripts/arch/pkg/
-scripts/arch/*.tar.zst
-
-# OS
+.vscode/
+.zed/
 .DS_Store
 Thumbs.db
