@@ -120,6 +120,7 @@ enum Signal {
     Kill,
 }
 
+#[cfg(unix)]
 impl Signal {
     fn as_raw(self) -> i32 {
         match self {
