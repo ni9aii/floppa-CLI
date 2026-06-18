@@ -115,7 +115,14 @@ jobs:
           fi
 
           find dist -maxdepth 2 -type f -print
-          (cd dist && find . -maxdepth 2 -type f -print0 | sort -z | xargs -0 sha256sum > "floppa-cli-${version}-SHA256SUMS.txt")
+          sums="floppa-cli-${version}-SHA256SUMS.txt"
+          find dist -mindepth 2 -maxdepth 2 -type f -exec mv {} dist/ \;
+          files="$(cd dist && find . -maxdepth 1 -type f ! -name "$sums" -printf '%f\n' | sort)"
+          if [[ -z "$files" ]]; then
+            echo "No release artifacts found." >&2
+            exit 1
+          fi
+          (cd dist && printf '%s\n' "$files" | xargs sha256sum > "$sums")
 
       - name: Create release draft
         uses: softprops/action-gh-release@v2
