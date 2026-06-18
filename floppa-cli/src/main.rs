@@ -386,10 +386,10 @@ impl CleanupKind {
     }
 
     fn cleanup(&mut self) {
-        if self.dns {
-            if let Err(e) = dns::restore_dns() {
-                eprintln!("DNS restore failed: {e}");
-            }
+        if self.dns
+            && let Err(e) = dns::restore_dns()
+        {
+            eprintln!("DNS restore failed: {e}");
         }
 
         match &self.tunnel {

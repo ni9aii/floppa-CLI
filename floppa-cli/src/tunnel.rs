@@ -391,10 +391,10 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
     if !route_exists(&["link", "show", &state.interface]) {
         bail!("VPN interface {} is not up", state.interface);
     }
-    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
-        if !route_exists(&["route", "show", route]) {
-            bail!("Endpoint route {route} via {gateway} is missing");
-        }
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway)
+        && !route_exists(&["route", "show", route])
+    {
+        bail!("Endpoint route {route} via {gateway} is missing");
     }
     if !route_exists(&["route", "show", "0.0.0.0/1"])
         || !route_exists(&["route", "show", "128.0.0.0/1"])

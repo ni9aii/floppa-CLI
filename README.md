@@ -32,16 +32,68 @@ Implemented CLI-side improvements:
 - Built-in local status command without contacting the API:
   - `floppa-cli status`
   - `floppa-cli status --interface floppa0`
+- Built-in safe tunnel stop command:
+  - `floppa-cli stop`
+  - `floppa-cli stop --interface floppa0`
+  - `floppa-cli stop --pid <pid>`
+  - `floppa-cli stop --force`
 - Idempotent Linux route handling with `ip route replace`.
 - Cleanup guard for DNS and routes on Ctrl+C/SIGTERM/error paths.
 - Basic route/interface verification after tunnel setup.
 
-## Build and test
+## Build, test, and CI
+
+Local checks:
 
 ```bash
 cargo fmt --check
 cargo check -p floppa-cli
 cargo test -p floppa-cli
+cargo clippy -p floppa-cli -- -D warnings
+```
+
+GitHub Actions CI is defined in:
+
+```text
+.github/workflows/ci.yml
+```
+
+It runs on `main` and pull requests:
+
+- `cargo fmt --check`
+- `cargo clippy --locked -- -D warnings`
+- `cargo test --locked`
+- `cargo build --release --locked -p floppa-cli`
+- `./target/release/floppa-cli --help`
+
+Release artifacts are built by:
+
+```text
+.github/workflows/release.yml
+```
+
+The release workflow triggers on `v*` tags and creates a draft GitHub Release with Linux, Windows, and macOS binaries plus `SHA256SUMS.txt`.
+
+## Install
+
+Build and install the CLI binary:
+
+```bash
+cargo build --release -p floppa-cli
+install -m 0755 target/release/floppa-cli "$HOME/.local/bin/floppa-cli"
+```
+
+Or install from the local crate path:
+
+```bash
+cargo install --path floppa-cli --locked
+```
+
+After installation, `~/.local/bin` should be in your shell PATH. For privileged network changes, use the absolute binary path because `sudo secure_path` may not include `~/.local/bin`:
+
+```bash
+sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" status
+sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" stop
 ```
 
 ## Run
@@ -51,9 +103,29 @@ cargo run -p floppa-cli -- --help
 cargo run -p floppa-cli -- login
 cargo run -p floppa-cli -- connect --protocol amneziawg
 cargo run -p floppa-cli -- status
+cargo run -p floppa-cli -- stop
 ```
 
-Connecting to a real VPN requires the user's Floppa account/session and Linux network privileges. Do not commit private configs, tokens, or VPN keys.
+Installed binary examples:
+
+```bash
+floppa-cli login
+floppa-cli device show
+floppa-cli peer delete --protocol amneziawg
+floppa-cli connect --protocol amneziawg --no-dns
+floppa-cli status
+floppa-cli stop
+```
+
+Privileged run examples:
+
+```bash
+sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" connect --protocol amneziawg --no-dns
+sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" status
+sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" stop
+```
+
+Connecting to a real VPN requires the user's Floppa account/session and Linux network privileges. Do not commit private configs, tokens, VPN keys, or user-specific absolute paths.
 
 ## Why this branch exists
 
