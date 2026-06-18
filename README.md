@@ -46,10 +46,24 @@ Implemented CLI-side improvements:
 Local checks:
 
 ```bash
-cargo fmt --check
-cargo check -p floppa-cli
-cargo test -p floppa-cli
-cargo clippy -p floppa-cli -- -D warnings
+./scripts/smoke-test.sh
+```
+
+The smoke script runs:
+
+- `cargo fmt --check`
+- `cargo test -p floppa-cli --locked`
+- `cargo clippy -p floppa-cli --locked -- -D warnings`
+- `cargo check -p floppa-cli --locked`
+- `cargo build --release --locked -p floppa-cli`
+- `./target/release/floppa-cli --help`
+- `./target/release/floppa-cli --version`
+- `./target/release/floppa-cli status` without failing when no tunnel is active
+
+Optional install smoke test:
+
+```bash
+RUN_CARGO_INSTALL=1 ./scripts/smoke-test.sh
 ```
 
 GitHub Actions CI is defined in:
@@ -58,13 +72,7 @@ GitHub Actions CI is defined in:
 .github/workflows/ci.yml
 ```
 
-It runs on `main` and pull requests:
-
-- `cargo fmt --check`
-- `cargo clippy --locked -- -D warnings`
-- `cargo test --locked`
-- `cargo build --release --locked -p floppa-cli`
-- `./target/release/floppa-cli --help`
+It runs the same smoke script on `main` and pull requests.
 
 Release artifacts are built by:
 
@@ -73,6 +81,28 @@ Release artifacts are built by:
 ```
 
 The release workflow triggers on `v*` tags and creates a draft GitHub Release with Linux, Windows, and macOS binaries plus `SHA256SUMS.txt`.
+
+## Pre-release checklist
+
+Before tagging the first release, complete this checklist:
+
+- [ ] `./scripts/smoke-test.sh` passes locally.
+- [ ] GitHub Actions CI is green on `main`.
+- [ ] `./target/release/floppa-cli --help` works.
+- [ ] `./target/release/floppa-cli --version` works.
+- [ ] `./target/release/floppa-cli status` works without an active tunnel.
+- [ ] `./target/release/floppa-cli stop` works without an active tunnel.
+- [ ] Optional install smoke test passes:
+  ```bash
+  RUN_CARGO_INSTALL=1 ./scripts/smoke-test.sh
+  ```
+- [ ] Release workflow creates a draft GitHub Release on a test `v*` tag.
+- [ ] Linux, Windows, and macOS artifacts are attached to the draft release.
+- [ ] `SHA256SUMS.txt` is attached to the draft release.
+- [ ] `CHANGELOG.md` is updated.
+- [ ] `README.md` still matches the release workflow and install instructions.
+
+After the test tag/release is verified, delete the test tag and draft release before publishing the real release.
 
 ## Install
 
