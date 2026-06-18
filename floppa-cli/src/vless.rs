@@ -1,7 +1,7 @@
+use crate::paths;
 use anyhow::{Result, anyhow, bail};
 use ipnetwork::IpNetwork;
 use shoes_lite::api::{VlessConfig, VlessTunnel};
-use std::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct NetworkState {
@@ -39,7 +39,7 @@ pub async fn create_tunnel(config: &VlessConfig, interface: &str) -> Result<Vles
 }
 
 fn run_ip(args: &[&str]) -> Result<()> {
-    let output = Command::new("ip").args(args).output()?;
+    let output = paths::command("ip").args(args).output()?;
     if output.status.success() {
         Ok(())
     } else {
@@ -49,7 +49,7 @@ fn run_ip(args: &[&str]) -> Result<()> {
 }
 
 fn get_default_gateway() -> Result<Option<String>> {
-    let output = Command::new("ip")
+    let output = paths::command("ip")
         .args(["route", "show", "default"])
         .output()?;
     let route_output = String::from_utf8_lossy(&output.stdout);
@@ -158,14 +158,14 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
 }
 
 fn run_ip_quiet(args: &[&str]) -> bool {
-    Command::new("ip")
+    paths::command("ip")
         .args(args)
         .output()
         .is_ok_and(|output| output.status.success())
 }
 
 fn route_exists(args: &[&str]) -> bool {
-    Command::new("ip")
+    paths::command("ip")
         .args(args)
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())

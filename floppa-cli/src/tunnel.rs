@@ -1,3 +1,4 @@
+use crate::paths;
 use anyhow::{Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
@@ -6,7 +7,6 @@ use gotatun::udp::socket::UdpSocketFactory;
 use gotatun::x25519;
 use ipnetwork::IpNetwork;
 use std::net::SocketAddr;
-use std::process::Command;
 use std::str::FromStr;
 
 pub const DEFAULT_INTERFACE_NAME: &str = "floppa0";
@@ -305,7 +305,7 @@ fn build_gotatun_awg(obf: &AwgObfuscation) -> Result<gotatun::noise::awg::AwgCon
 }
 
 fn run_ip(args: &[&str]) -> Result<()> {
-    let output = Command::new("ip").args(args).output()?;
+    let output = paths::command("ip").args(args).output()?;
     if output.status.success() {
         Ok(())
     } else {
@@ -315,7 +315,7 @@ fn run_ip(args: &[&str]) -> Result<()> {
 }
 
 fn get_default_gateway() -> Result<Option<String>> {
-    let output = Command::new("ip")
+    let output = paths::command("ip")
         .args(["route", "show", "default"])
         .output()?;
     let route_output = String::from_utf8_lossy(&output.stdout);
@@ -421,14 +421,14 @@ pub fn status(interface: &str) -> Result<()> {
 }
 
 fn run_ip_quiet(args: &[&str]) -> bool {
-    Command::new("ip")
+    paths::command("ip")
         .args(args)
         .output()
         .is_ok_and(|output| output.status.success())
 }
 
 fn route_exists(args: &[&str]) -> bool {
-    Command::new("ip")
+    paths::command("ip")
         .args(args)
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
