@@ -45,3 +45,4 @@ All notable changes to `floppa-cli` are documented in this file.
 - Windows release build by gating Unix-only signal handling behind `#[cfg(unix)]`.
 - macOS release runner by using the current GitHub-hosted macOS runner.
 - README logo rendering by using a solid PNG instead of an alpha-only viewer-dependent PNG.
+- Release checksum generation for flat downloaded assets and workflow_dispatch tag handling.

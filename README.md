@@ -96,6 +96,8 @@ Release verification for `v0.1.0-cli-alpha` was performed before publishing:
 - Linux, Windows, and macOS artifacts were attached to the draft release.
 - `SHA256SUMS.txt` was attached to the draft release.
 - The test tag and test draft release were deleted after verification.
+- Final release workflow run `27792844338` passed on `v0.1.0-cli-alpha`.
+- Downloaded release assets were verified with `SHA256SUMS.txt`.
 
 After the test release was verified, the final `v0.1.0-cli-alpha` tag can be published from the GitHub draft release.
 
