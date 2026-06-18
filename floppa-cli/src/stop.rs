@@ -1,10 +1,18 @@
-use anyhow::{Context, Result, anyhow, bail};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::{Result, anyhow, bail};
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process;
+#[cfg(unix)]
 use std::thread;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 use crate::tunnel;
 
 #[cfg(unix)]
@@ -102,6 +110,7 @@ fn wait_until_disconnected(interface: &str, pid: u32, timeout: Duration) -> bool
     }
 }
 
+#[cfg(unix)]
 #[derive(Clone, Copy)]
 enum Signal {
     Terminate,
@@ -124,6 +133,7 @@ impl Signal {
     }
 }
 
+#[cfg(unix)]
 fn signal(process: &ConnectProcess, signal: Signal) -> Result<()> {
     let target = if process.pgid == process.pid {
         -(process.pgid as i32)
@@ -145,6 +155,7 @@ fn signal(process: &ConnectProcess, signal: Signal) -> Result<()> {
     }
 }
 
+#[cfg(unix)]
 fn find_connect_processes(current_pid: u32) -> Result<Vec<ConnectProcess>> {
     let mut processes = Vec::new();
 
@@ -173,12 +184,14 @@ fn find_connect_processes(current_pid: u32) -> Result<Vec<ConnectProcess>> {
     Ok(processes)
 }
 
+#[cfg(unix)]
 fn parse_proc_pid(path: &Path) -> Option<u32> {
     path.file_name()
         .and_then(|name| name.to_str())
         .and_then(|name| name.parse().ok())
 }
 
+#[cfg(unix)]
 fn read_pgid(pid: u32) -> Result<Option<u32>> {
     let stat = match fs::read_to_string(proc_path(pid, "stat")) {
         Ok(stat) => stat,
@@ -202,6 +215,7 @@ fn read_pgid(pid: u32) -> Result<Option<u32>> {
         .with_context(|| format!("Failed to parse process group for pid {pid}"))
 }
 
+#[cfg(unix)]
 fn read_cmdline(pid: u32) -> Result<Option<String>> {
     let raw = match fs::read(proc_path(pid, "cmdline")) {
         Ok(raw) => raw,
@@ -226,10 +240,12 @@ fn read_cmdline(pid: u32) -> Result<Option<String>> {
     Ok(Some(parts.join(" ")))
 }
 
+#[cfg(unix)]
 fn proc_path(pid: u32, name: &str) -> PathBuf {
     Path::new("/proc").join(pid.to_string()).join(name)
 }
 
+#[cfg(unix)]
 fn is_floppa_connect_cmdline(cmdline: &str) -> bool {
     let parts = cmdline.split_whitespace().collect::<Vec<_>>();
     let first = parts.first().copied().unwrap_or_default();
@@ -243,6 +259,7 @@ fn is_floppa_connect_cmdline(cmdline: &str) -> bool {
             .any(|window| window[0] == "connect" || window[1] == "connect")
 }
 
+#[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
     Path::new("/proc").join(pid.to_string()).exists()
 }
