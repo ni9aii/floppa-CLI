@@ -85,31 +85,32 @@ mod tests {
     #[test]
     fn prepends_exe_parent_and_local_bin_without_duplicates() {
         let path = configured_path_from(
-            Some(Path::new("/tmp/floppa/floppa-cli")),
-            Some(Path::new("/home/ni9aii")),
-            Some(OsStr::new("/tmp/floppa:/usr/bin:/tmp/floppa")),
+            Some(Path::new("bin/floppa-cli")),
+            Some(Path::new("home")),
+            Some(OsStr::new("existing:/usr/bin:existing")),
         );
 
         let dirs = paths(&path);
 
-        assert_eq!(dirs[0], "/tmp/floppa");
-        assert_eq!(dirs[1], "/home/ni9aii/.local/bin");
-        assert_eq!(dirs[2], "/usr/bin");
-        assert_eq!(dirs.len(), 3);
+        assert_eq!(dirs[0], "bin");
+        assert_eq!(dirs[1], "home/.local/bin");
+        assert_eq!(dirs[2], "existing");
+        assert_eq!(dirs[3], "/usr/bin");
+        assert_eq!(dirs.len(), 4);
     }
 
     #[test]
     fn handles_empty_path() {
         let path = configured_path_from(
-            Some(Path::new("/tmp/floppa/floppa-cli")),
-            Some(Path::new("/home/ni9aii")),
+            Some(Path::new("bin/floppa-cli")),
+            Some(Path::new("home")),
             Some(OsStr::new("")),
         );
 
         let dirs = paths(&path);
 
-        assert_eq!(dirs[0], "/tmp/floppa");
-        assert_eq!(dirs[1], "/home/ni9aii/.local/bin");
+        assert_eq!(dirs[0], "bin");
+        assert_eq!(dirs[1], "home/.local/bin");
         assert!(dirs.contains(&"/usr/bin".to_string()));
         assert!(!dirs.contains(&"".to_string()));
     }

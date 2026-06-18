@@ -249,15 +249,13 @@ mod tests {
     #[test]
     fn detects_floppa_connect_cmdline() {
         assert!(is_floppa_connect_cmdline(
-            "/home/ni9aii/.local/bin/floppa-cli connect --protocol amneziawg"
+            "bin/floppa-cli connect --protocol amneziawg"
         ));
         assert!(is_floppa_connect_cmdline(
-            "floppa-cli-dev --log-file /tmp/floppa.log connect"
+            "floppa-cli-dev --log-file log/floppa.log connect"
         ));
-        assert!(!is_floppa_connect_cmdline(
-            "/home/ni9aii/.local/bin/floppa-cli stop"
-        ));
-        assert!(!is_floppa_connect_cmdline("/usr/bin/floppa-helper connect"));
+        assert!(!is_floppa_connect_cmdline("bin/floppa-cli stop"));
+        assert!(!is_floppa_connect_cmdline("system/floppa-helper connect"));
     }
 
     #[test]

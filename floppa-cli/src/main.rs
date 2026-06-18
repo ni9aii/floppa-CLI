@@ -16,7 +16,7 @@ const DEFAULT_API_URL: &str = "https://floppa.okhsunrog.dev/api";
 #[derive(Parser)]
 #[command(name = "floppa-cli", about = "CLI client for Floppa VPN")]
 struct Cli {
-    /// Write debug logs to a file (e.g. /tmp/floppa-cli.log)
+    /// Write debug logs to a file, for example `floppa-cli.log`
     #[arg(long, global = true)]
     log_file: Option<String>,
 
