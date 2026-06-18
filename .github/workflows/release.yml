@@ -106,14 +106,15 @@ jobs:
       - name: Prepare checksums
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          if [[ "$version" == "$GITHUB_REF_NAME" || -z "$version" ]]; then
-            version="${{ inputs.tag }}"
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
           fi
-          if [[ -z "$version" ]]; then
-            echo "Release tag is required." >&2
+          if [[ -z "$tag" ]]; then
+            echo "Release tag is required. Use a v* tag or provide the tag input for workflow_dispatch." >&2
             exit 1
           fi
+          version="${tag#v}"
 
           find dist -maxdepth 2 -type f -print
           sums="floppa-cli-${version}-SHA256SUMS.txt"
