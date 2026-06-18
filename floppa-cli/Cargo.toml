@@ -27,5 +27,6 @@ tracing-subscriber.workspace = true
 tracing-log = "0.2.0"
 tracing-appender = "0.2.4"
 rand.workspace = true
+libc = "0.2"
 # Uncomment for local development, comment out before commit/push:
 # shoes-lite = { path = "../../rust/shoes-lite" }

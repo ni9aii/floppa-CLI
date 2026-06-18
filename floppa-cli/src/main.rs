@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod dns;
 mod paths;
+mod stop;
 mod tunnel;
 mod vless;
 
@@ -83,6 +84,18 @@ enum Command {
         /// TUN interface name
         #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
         interface: String,
+    },
+    /// Safely stop a running floppa-cli connect process
+    Stop {
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
+        /// Target a specific floppa-cli connect PID when multiple are running
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Send SIGKILL if graceful SIGTERM stop times out
+        #[arg(long)]
+        force: bool,
     },
     /// Remove saved login token
     Logout,
@@ -330,6 +343,13 @@ async fn main() -> Result<()> {
         }
         Command::Status { interface } => {
             tunnel::status(&interface)?;
+        }
+        Command::Stop {
+            interface,
+            pid,
+            force,
+        } => {
+            stop::stop(&interface, pid, force)?;
         }
         Command::Logout => {
             auth::logout()?;

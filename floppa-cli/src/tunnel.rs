@@ -408,7 +408,7 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
 }
 
 pub fn status(interface: &str) -> Result<()> {
-    if !route_exists(&["link", "show", interface]) {
+    if !interface_exists(interface) {
         bail!("Floppa {interface}: not connected");
     }
     if !route_exists(&["route", "show", "0.0.0.0/1"])
@@ -418,6 +418,10 @@ pub fn status(interface: &str) -> Result<()> {
     }
     println!("Floppa {interface}: connected");
     Ok(())
+}
+
+pub fn interface_exists(interface: &str) -> bool {
+    route_exists(&["link", "show", interface])
 }
 
 fn run_ip_quiet(args: &[&str]) -> bool {
