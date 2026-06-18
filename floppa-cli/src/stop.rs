@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::tunnel;
 
+#[cfg(unix)]
 #[derive(Debug, Clone)]
 struct ConnectProcess {
     pid: u32,
@@ -14,6 +15,20 @@ struct ConnectProcess {
 }
 
 pub fn stop(interface: &str, pid: Option<u32>, force: bool) -> Result<()> {
+    #[cfg(unix)]
+    {
+        stop_unix(interface, pid, force)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (interface, pid, force);
+        bail!("floppa-cli stop is only supported on Unix-like systems")
+    }
+}
+
+#[cfg(unix)]
+fn stop_unix(interface: &str, pid: Option<u32>, force: bool) -> Result<()> {
     if !tunnel::interface_exists(interface) {
         println!("Floppa {interface}: not connected");
         return Ok(());
