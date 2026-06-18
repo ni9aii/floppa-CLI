@@ -1,7 +1,7 @@
 # Floppa VPN CLI
 
 <p align="center">
-  <img src="branding/logo-transparent.png" alt="Floppa VPN logo" width="180" />
+  <img src="branding/logo-solid.png" alt="Floppa VPN logo" width="180" />
 </p>
 
 CLI-only fork/branch for the headless `floppa-cli` utility. This branch intentionally does not include the Tauri desktop client, web admin UI, server, daemon, migrations, mobile platform glue, or packaging assets from the upstream monorepo.
