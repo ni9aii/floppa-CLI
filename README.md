@@ -82,27 +82,22 @@ Release artifacts are built by:
 
 The release workflow triggers on `v*` tags and creates a draft GitHub Release with Linux, Windows, and macOS binaries plus `SHA256SUMS.txt`.
 
-## Pre-release checklist
+## Release verification
 
-Before tagging the first release, complete this checklist:
+Release verification for `v0.1.0-cli-alpha` was performed before publishing:
 
-- [ ] `./scripts/smoke-test.sh` passes locally.
-- [ ] GitHub Actions CI is green on `main`.
-- [ ] `./target/release/floppa-cli --help` works.
-- [ ] `./target/release/floppa-cli --version` works.
-- [ ] `./target/release/floppa-cli status` works without an active tunnel.
-- [ ] `./target/release/floppa-cli stop` works without an active tunnel.
-- [ ] Optional install smoke test passes:
-  ```bash
-  RUN_CARGO_INSTALL=1 ./scripts/smoke-test.sh
-  ```
-- [ ] Release workflow creates a draft GitHub Release on a test `v*` tag.
-- [ ] Linux, Windows, and macOS artifacts are attached to the draft release.
-- [ ] `SHA256SUMS.txt` is attached to the draft release.
-- [ ] `CHANGELOG.md` is updated.
-- [ ] `README.md` still matches the release workflow and install instructions.
+- `./scripts/smoke-test.sh` passed locally.
+- GitHub Actions CI was green on `main`.
+- `./target/release/floppa-cli --help` worked.
+- `./target/release/floppa-cli --version` worked.
+- `./target/release/floppa-cli status` worked without an active tunnel.
+- `./target/release/floppa-cli stop` worked without an active tunnel.
+- Release workflow created a draft GitHub Release on the test `v0.1.0-cli-alpha-test` tag.
+- Linux, Windows, and macOS artifacts were attached to the draft release.
+- `SHA256SUMS.txt` was attached to the draft release.
+- The test tag and test draft release were deleted after verification.
 
-After the test tag/release is verified, delete the test tag and draft release before publishing the real release.
+After the test release was verified, the final `v0.1.0-cli-alpha` tag can be published from the GitHub draft release.
 
 ## Install
 
