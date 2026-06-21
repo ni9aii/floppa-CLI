@@ -192,7 +192,7 @@ floppa-cli service uninstall
 
 For user services, use `--scope user`; the unit is written under `$XDG_CONFIG_HOME/systemd/user` and managed with `systemctl --user`.
 
-The generated unit runs the service as the current user, sets `HOME`, grants `CAP_NET_ADMIN` and `CAP_NET_RAW` through systemd capabilities, restarts on failure, and logs to the journal. The default log file is `~/.local/state/floppa-cli/floppa-cli.log`; override it with `--log-file /absolute/path.log`.
+The generated unit runs the service as the current user, sets `HOME`, grants `CAP_NET_ADMIN` and `CAP_NET_RAW` through systemd capabilities, restarts on failure, and logs to the journal. The default log file is `~/.local/state/floppa-cli/floppa-cli.log`; override it with `--service-log-file /absolute/path.log`.
 
 Connecting to a real VPN requires the user's Floppa account/session and Linux network privileges. Do not commit private configs, tokens, VPN keys, or user-specific absolute paths.
 

@@ -169,7 +169,7 @@ enum ServiceCommand {
         #[arg(long, env = "HOME")]
         home: Option<PathBuf>,
         /// Absolute path to the service log file
-        #[arg(long)]
+        #[arg(long = "service-log-file")]
         log_file: Option<PathBuf>,
     },
     /// Remove an installed systemd unit
