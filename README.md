@@ -37,6 +37,15 @@ Implemented CLI-side improvements:
   - `floppa-cli stop --interface floppa0`
   - `floppa-cli stop --pid <pid>`
   - `floppa-cli stop --force`
+- Systemd service management for headless Linux hosts:
+  - `floppa-cli service install`
+  - `floppa-cli service start`
+  - `floppa-cli service stop`
+  - `floppa-cli service restart`
+  - `floppa-cli service status`
+  - `floppa-cli service enable`
+  - `floppa-cli service disable`
+  - `floppa-cli service uninstall`
 - Idempotent Linux route handling with `ip route replace`.
 - Cleanup guard for DNS and routes on Ctrl+C/SIGTERM/error paths.
 - Basic route/interface verification after tunnel setup.
@@ -157,6 +166,33 @@ sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" connect --protocol amneziawg
 sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" status
 sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" stop
 ```
+
+## Systemd service
+
+`floppa-cli service` installs and manages a systemd unit that runs `floppa-cli connect` in the background. The default scope is `system`, so `install`, `uninstall`, `enable`, and `disable` use `sudo systemctl`; `status`, `start`, `stop`, and `restart` also use `sudo systemctl` by default.
+
+Install a system service using the currently running binary:
+
+```bash
+floppa-cli service install --scope system --name floppa-cli --protocol amneziawg --no-dns
+sudo systemctl enable --now floppa-cli
+```
+
+Useful service commands:
+
+```bash
+floppa-cli service status
+floppa-cli service start
+floppa-cli service stop
+floppa-cli service restart
+floppa-cli service enable
+floppa-cli service disable
+floppa-cli service uninstall
+```
+
+For user services, use `--scope user`; the unit is written under `$XDG_CONFIG_HOME/systemd/user` and managed with `systemctl --user`.
+
+The generated unit runs the service as the current user, sets `HOME`, grants `CAP_NET_ADMIN` and `CAP_NET_RAW` through systemd capabilities, restarts on failure, and logs to the journal. The default log file is `~/.local/state/floppa-cli/floppa-cli.log`; override it with `--log-file /absolute/path.log`.
 
 Connecting to a real VPN requires the user's Floppa account/session and Linux network privileges. Do not commit private configs, tokens, VPN keys, or user-specific absolute paths.
 

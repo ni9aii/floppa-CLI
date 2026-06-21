@@ -2,12 +2,14 @@ mod api;
 mod auth;
 mod dns;
 mod paths;
+mod service;
 mod stop;
 mod tunnel;
 mod vless;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 
@@ -126,8 +128,113 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Install and manage a systemd service for the VPN tunnel
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
     /// Remove saved login token
     Logout,
+}
+
+#[derive(Subcommand)]
+enum ServiceCommand {
+    /// Install a systemd unit for `floppa-cli connect`
+    Install {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+        /// Absolute path to the floppa-cli binary
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Protocol passed to `connect`
+        #[arg(long, default_value = "amneziawg")]
+        protocol: String,
+        /// TUN interface name
+        #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
+        interface: String,
+        /// Skip DNS configuration
+        #[arg(long)]
+        no_dns: bool,
+        /// API URL passed to `connect`
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+        /// Unix user that should run the service
+        #[arg(long, env = "USER")]
+        user: Option<String>,
+        /// Home directory for the service user
+        #[arg(long, env = "HOME")]
+        home: Option<PathBuf>,
+        /// Absolute path to the service log file
+        #[arg(long)]
+        log_file: Option<PathBuf>,
+    },
+    /// Remove an installed systemd unit
+    Uninstall {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Start the systemd service
+    Start {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Stop the systemd service
+    Stop {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Restart the systemd service
+    Restart {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Show systemd service status
+    Status {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Enable the systemd service at boot
+    Enable {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
+    /// Disable the systemd service at boot
+    Disable {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -392,6 +499,9 @@ async fn main() -> Result<()> {
         } => {
             stop::stop(&interface, pid, force)?;
         }
+        Command::Service { command } => {
+            handle_service_command(command)?;
+        }
         Command::Logout => {
             auth::logout()?;
             eprintln!("Logged out.");
@@ -399,6 +509,99 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn handle_service_command(command: ServiceCommand) -> Result<()> {
+    match command {
+        ServiceCommand::Install {
+            scope,
+            name,
+            binary,
+            protocol,
+            interface,
+            no_dns,
+            api_url,
+            user,
+            home,
+            log_file,
+        } => {
+            let home = home.unwrap_or_else(default_home);
+            let user = user
+                .or_else(|| std::env::var("USER").ok())
+                .unwrap_or_default();
+            let log_file = log_file.unwrap_or_else(|| {
+                home.join(".local")
+                    .join("state")
+                    .join("floppa-cli")
+                    .join("floppa-cli.log")
+            });
+            let binary = binary.unwrap_or_else(|| {
+                std::env::current_exe().unwrap_or_else(|_| PathBuf::from("floppa-cli"))
+            });
+            service::install(&service::ServiceInstallOptions {
+                scope,
+                name,
+                binary,
+                protocol,
+                interface,
+                no_dns,
+                api_url,
+                user,
+                home,
+                log_file,
+            })
+        }
+        ServiceCommand::Uninstall { scope, name } => {
+            service::uninstall(&service::ServiceUninstallOptions { scope, name })
+        }
+        ServiceCommand::Start { scope, name } => {
+            service::control(&service::ServiceControlOptions {
+                scope,
+                name,
+                action: service::ServiceAction::Start,
+            })
+        }
+        ServiceCommand::Stop { scope, name } => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Stop,
+        }),
+        ServiceCommand::Restart { scope, name } => {
+            service::control(&service::ServiceControlOptions {
+                scope,
+                name,
+                action: service::ServiceAction::Restart,
+            })
+        }
+        ServiceCommand::Status { scope, name } => {
+            service::control(&service::ServiceControlOptions {
+                scope,
+                name,
+                action: service::ServiceAction::Status,
+            })
+        }
+        ServiceCommand::Enable { scope, name } => {
+            service::control(&service::ServiceControlOptions {
+                scope,
+                name,
+                action: service::ServiceAction::Enable,
+            })
+        }
+        ServiceCommand::Disable { scope, name } => {
+            service::control(&service::ServiceControlOptions {
+                scope,
+                name,
+                action: service::ServiceAction::Disable,
+            })
+        }
+    }
+}
+
+fn default_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 struct CleanupKind {
