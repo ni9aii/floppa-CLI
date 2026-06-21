@@ -128,15 +128,21 @@ sudo env HOME="$HOME" "$HOME/.local/bin/floppa-cli" stop
 ```bash
 cargo run -p floppa-cli -- --help
 cargo run -p floppa-cli -- login
+cargo run -p floppa-cli -- login --method account --login your-login
+cargo run -p floppa-cli -- login-account --login your-login
 cargo run -p floppa-cli -- connect --protocol amneziawg
 cargo run -p floppa-cli -- status
 cargo run -p floppa-cli -- stop
 ```
 
+`login` prompts for the login method (`telegram` or `account`). Use `--method account --login your-login` to skip the prompt and authenticate with Floppa account credentials. `login-account` remains available as a direct account-login command. By default, the password is prompted without echoing it; for automation, set `FLOPPA_ACCOUNT_LOGIN` and `FLOPPA_ACCOUNT_PASSWORD` instead of passing secrets on the command line.
+
 Installed binary examples:
 
 ```bash
 floppa-cli login
+floppa-cli login --method account --login your-login
+floppa-cli login-account --login your-login
 floppa-cli device show
 floppa-cli peer delete --protocol amneziawg
 floppa-cli connect --protocol amneziawg --no-dns
