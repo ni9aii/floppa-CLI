@@ -26,8 +26,37 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Log in via Telegram (opens browser)
+    /// Choose login method or prompt interactively.
     Login {
+        /// Login method. If omitted, the CLI asks interactively.
+        #[arg(long, value_enum)]
+        method: Option<auth::LoginMethod>,
+        /// Account login for `--method account`. If omitted, it is prompted interactively.
+        #[arg(long, env = "FLOPPA_ACCOUNT_LOGIN")]
+        login: Option<String>,
+        /// Environment variable that contains the password for `--method account`.
+        /// If unset, password is prompted hidden.
+        #[arg(
+            long,
+            env = "FLOPPA_ACCOUNT_PASSWORD_ENV",
+            default_value = "FLOPPA_ACCOUNT_PASSWORD"
+        )]
+        password_env: String,
+        #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
+        api_url: String,
+    },
+    /// Log in with a Floppa account login + password without method selection.
+    LoginAccount {
+        /// Account login. If omitted, it is prompted interactively.
+        #[arg(long, env = "FLOPPA_ACCOUNT_LOGIN")]
+        login: Option<String>,
+        /// Environment variable that contains the password. If unset, password is prompted hidden.
+        #[arg(
+            long,
+            env = "FLOPPA_ACCOUNT_PASSWORD_ENV",
+            default_value = "FLOPPA_ACCOUNT_PASSWORD"
+        )]
+        password_env: String,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
@@ -175,8 +204,20 @@ async fn main() -> Result<()> {
     tracing_log::LogTracer::init().ok();
 
     match cli.command {
-        Command::Login { api_url } => {
-            auth::login(&api_url).await?;
+        Command::Login {
+            method,
+            login,
+            password_env,
+            api_url,
+        } => {
+            auth::login(&api_url, method, login.as_deref(), &password_env).await?;
+        }
+        Command::LoginAccount {
+            login,
+            password_env,
+            api_url,
+        } => {
+            auth::login_account(&api_url, login.as_deref(), &password_env).await?;
         }
         Command::Connect {
             config,

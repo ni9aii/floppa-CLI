@@ -94,6 +94,12 @@ struct ExchangeCodeRequest {
     code: String,
 }
 
+#[derive(Debug, Serialize)]
+struct AccountLoginRequest {
+    login: String,
+    password: String,
+}
+
 impl ApiClient {
     pub fn new(base_url: &str, token: &str) -> Self {
         Self {
@@ -339,6 +345,35 @@ impl ApiClient {
             .await
             .context("Failed to parse VLESS config response")?;
         Ok(vless.uri)
+    }
+
+    /// Authenticate with a login + password and return a JWT token (no auth required).
+    pub async fn login_account(
+        base_url: &str,
+        login: &str,
+        password: &str,
+    ) -> Result<AuthResponse> {
+        let client = reqwest::Client::new();
+        let url = format!("{}/auth/account/login", base_url.trim_end_matches('/'));
+
+        let resp = client
+            .post(&url)
+            .json(&AccountLoginRequest {
+                login: login.to_string(),
+                password: password.to_string(),
+            })
+            .send()
+            .await
+            .context("Failed to log in with account credentials")?;
+
+        if resp.status() == 401 {
+            bail!("Invalid login or password. Try again or use Telegram login.");
+        }
+        if !resp.status().is_success() {
+            bail!("Account login failed: {}", resp.status());
+        }
+
+        resp.json().await.context("Failed to parse auth response")
     }
 
     /// Exchange a one-time login code for a JWT token (no auth required).

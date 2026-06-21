@@ -1,10 +1,20 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
+use clap::ValueEnum;
 use std::fs;
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::api::ApiClient;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum LoginMethod {
+    /// Open browser and authenticate through Telegram.
+    Telegram,
+    /// Authenticate with Floppa account login + password.
+    Account,
+}
 
 fn config_dir() -> Result<PathBuf> {
     let dir = dirs::config_dir()
@@ -54,8 +64,25 @@ pub fn logout() -> Result<()> {
     Ok(())
 }
 
-/// Run the login flow: start local server, open browser, capture code, exchange for JWT.
-pub async fn login(api_url: &str) -> Result<()> {
+pub async fn login(
+    api_url: &str,
+    method: Option<LoginMethod>,
+    login: Option<&str>,
+    password_env: &str,
+) -> Result<()> {
+    let method = match method {
+        Some(method) => method,
+        None => prompt_login_method()?,
+    };
+
+    match method {
+        LoginMethod::Telegram => login_telegram(api_url).await,
+        LoginMethod::Account => login_account(api_url, login, password_env).await,
+    }
+}
+
+/// Run the Telegram login flow: start local server, open browser, capture code, exchange for JWT.
+pub async fn login_telegram(api_url: &str) -> Result<()> {
     // Bind to a random port on 127.0.0.1
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
@@ -91,6 +118,75 @@ pub async fn login(api_url: &str) -> Result<()> {
     eprintln!("Logged in as {name} (id: {})", auth.user.id);
 
     Ok(())
+}
+
+/// Log in with a Floppa account login + password.
+///
+/// The password is read from the configured environment variable when present, otherwise from a
+/// hidden terminal prompt. Do not pass passwords as command-line arguments.
+pub async fn login_account(api_url: &str, login: Option<&str>, password_env: &str) -> Result<()> {
+    let login = match login {
+        Some(login) => login.trim().to_string(),
+        None => prompt_line("Login: ")?,
+    };
+    if login.is_empty() {
+        bail!("Login cannot be empty");
+    }
+
+    let password = match std::env::var(password_env) {
+        Ok(password) => password,
+        Err(std::env::VarError::NotPresent) => rpassword::prompt_password("Password: ")?,
+        Err(err) => return Err(err).with_context(|| format!("Failed to read {password_env}")),
+    };
+    if password.is_empty() {
+        bail!("Password cannot be empty");
+    }
+
+    let auth = ApiClient::login_account(api_url, &login, &password).await?;
+    save_token(&auth.token)?;
+
+    let name = auth
+        .user
+        .username
+        .as_deref()
+        .or(auth.user.first_name.as_deref())
+        .unwrap_or("user");
+
+    eprintln!("Logged in as {name} (id: {})", auth.user.id);
+
+    Ok(())
+}
+
+fn prompt_login_method() -> Result<LoginMethod> {
+    if !io::stdin().is_terminal() {
+        bail!(
+            "Interactive method selection requires a TTY. Pass `--method telegram` or `--method account`."
+        );
+    }
+
+    eprintln!("Choose login method:");
+    eprintln!("1) Telegram");
+    eprintln!("2) Account login + password");
+
+    loop {
+        let choice = prompt_line("Method [1/2]: ")?;
+        match choice.trim() {
+            "1" | "t" | "T" | "telegram" | "Telegram" => return Ok(LoginMethod::Telegram),
+            "2" | "a" | "A" | "account" | "Account" => return Ok(LoginMethod::Account),
+            "" => eprintln!("Please enter 1 or 2."),
+            _ => eprintln!("Unknown method `{choice}`. Enter 1 for Telegram or 2 for account."),
+        }
+    }
+}
+
+fn prompt_line(prompt: &str) -> Result<String> {
+    let mut stdout = io::stdout();
+    write!(stdout, "{prompt}")?;
+    stdout.flush()?;
+
+    let mut line = String::new();
+    io::stdin().read_line(&mut line)?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_string())
 }
 
 /// Wait for a single HTTP GET request on the callback listener, extract `code` param.
@@ -150,4 +246,119 @@ fn urlencoding(s: &str) -> String {
             _ => format!("%{:02X}", c as u8),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::task::JoinHandle;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(old) => unsafe { std::env::set_var(self.key, old) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    async fn spawn_account_login_server() -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let n = stream.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let (head, body) = request.split_once("\r\n\r\n").unwrap();
+
+            assert!(head.starts_with("POST /auth/account/login HTTP/1.1"));
+            assert!(
+                head.contains("content-type: application/json")
+                    || head.contains("Content-Type: application/json")
+            );
+            assert!(!head.contains("authorization:"));
+
+            let body: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(body["login"], "alice");
+            assert_eq!(body["password"], "s3cret");
+
+            let response_body = serde_json::json!({
+                "token": "server-token",
+                "user": {
+                    "id": 42,
+                    "username": "alice",
+                    "first_name": null,
+                    "is_admin": false
+                }
+            });
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.to_string().len(),
+                response_body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.flush().await.unwrap();
+        });
+        (base_url, handle)
+    }
+
+    fn temp_config_home(test_name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("floppa-cli-{test_name}-{unique}"))
+    }
+
+    #[tokio::test]
+    async fn login_account_reads_password_from_env_saves_token_and_posts_credentials() {
+        let config_home = temp_config_home("login-account-env");
+        fs::create_dir_all(&config_home).unwrap();
+        let _xdg_config_home = EnvGuard::set("XDG_CONFIG_HOME", &config_home.to_string_lossy());
+        let _password = EnvGuard::set("FLOPPA_TEST_ACCOUNT_PASSWORD", "s3cret");
+
+        let (base_url, server) = spawn_account_login_server().await;
+        login_account(&base_url, Some("alice"), "FLOPPA_TEST_ACCOUNT_PASSWORD")
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(load_token().unwrap().as_deref(), Some("server-token"));
+        logout().unwrap();
+        fs::remove_dir_all(config_home).unwrap();
+    }
+
+    #[derive(clap::Parser)]
+    struct LoginMethodArgs {
+        #[arg(long, value_enum)]
+        method: Option<LoginMethod>,
+    }
+
+    #[test]
+    fn login_method_value_enum_accepts_account_and_telegram() {
+        let account = LoginMethodArgs::parse_from(["test", "--method", "account"]);
+        assert_eq!(account.method, Some(LoginMethod::Account));
+
+        let telegram = LoginMethodArgs::parse_from(["test", "--method", "telegram"]);
+        assert_eq!(telegram.method, Some(LoginMethod::Telegram));
+    }
 }
