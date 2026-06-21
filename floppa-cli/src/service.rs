@@ -147,7 +147,7 @@ pub fn control(opts: &ServiceControlOptions) -> Result<()> {
     };
 
     if opts.action == ServiceAction::Status {
-        let output = systemctl_output(opts.scope, ["--no-pager", "status", &opts.name])?;
+        let output = systemctl_output(opts.scope, false, ["--no-pager", "status", &opts.name])?;
         std::io::stdout().write_all(&output.stdout)?;
         if !output.stderr.is_empty() {
             std::io::stderr().write_all(&output.stderr)?;
@@ -276,7 +276,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    let mut command = systemctl_command(scope);
+    let mut command = systemctl_command(scope, true);
     command.args(args);
     let output = command.output().context("Failed to run systemctl")?;
     if output.status.success() {
@@ -287,24 +287,29 @@ where
     }
 }
 
-fn systemctl_output<I, S>(scope: ServiceScope, args: I) -> Result<std::process::Output>
+fn systemctl_output<I, S>(
+    scope: ServiceScope,
+    privileged: bool,
+    args: I,
+) -> Result<std::process::Output>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    let mut command = systemctl_command(scope);
+    let mut command = systemctl_command(scope, privileged);
     command.args(args);
     command.output().context("Failed to run systemctl")
 }
 
-fn systemctl_command(scope: ServiceScope) -> Command {
-    match scope {
-        ServiceScope::System => {
+fn systemctl_command(scope: ServiceScope, privileged: bool) -> Command {
+    match (scope, privileged) {
+        (ServiceScope::System, true) => {
             let mut command = Command::new("sudo");
             command.arg("systemctl");
             command
         }
-        ServiceScope::User => {
+        (ServiceScope::System, false) => Command::new("systemctl"),
+        (ServiceScope::User, _) => {
             let mut command = Command::new("systemctl");
             command.arg("--user");
             command
