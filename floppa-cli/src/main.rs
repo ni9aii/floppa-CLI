@@ -527,6 +527,11 @@ fn handle_service_command(command: ServiceCommand) -> Result<()> {
         } => {
             let home = home.unwrap_or_else(default_home);
             let user = user
+                .or_else(|| {
+                    std::env::var("SUDO_USER")
+                        .ok()
+                        .filter(|value| !value.is_empty())
+                })
                 .or_else(|| std::env::var("USER").ok())
                 .unwrap_or_default();
             let log_file = log_file.unwrap_or_else(|| {
