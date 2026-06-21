@@ -11,7 +11,7 @@ CLI-only fork/branch for the headless `floppa-cli` utility. This branch intentio
 - `floppa-cli` Rust binary.
 - Root Cargo workspace and lockfile for reproducible CLI builds.
 - Linux CLI networking code for WireGuard/AmneziaWG and VLESS+REALITY tunnels.
-- Telegram login/auth flow used by the CLI.
+- Telegram and account login/password auth flow used by the CLI.
 - Minimal README with build/run/test commands.
 
 ## CLI work in this branch
