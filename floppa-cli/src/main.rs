@@ -319,7 +319,21 @@ async fn main() -> Result<()> {
         } => {
             auth::login(&api_url, method, login.as_deref(), &password_env).await?;
         }
+        Command::LoginAccount {
+            login,
+            password_env,
+            api_url,
+        } => {
+            auth::login_account(&api_url, login.as_deref(), &password_env).await?;
+        }
         Command::Connect {
+            config,
+            protocol,
+            interface,
+            no_dns,
+            api_url,
+        } => {
+            let config_str = match config {
                 Some(path) => std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {path}"))?,
                 None => {
