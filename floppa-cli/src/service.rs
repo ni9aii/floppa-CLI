@@ -179,7 +179,10 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
         );
     }
     if !opts.api_url.starts_with("https://") && !opts.api_url.starts_with("http://") {
-        bail!("api_url must start with http:// or https://: {}", opts.api_url);
+        bail!(
+            "api_url must start with http:// or https://: {}",
+            opts.api_url
+        );
     }
 
     let mut exec_args = vec![
