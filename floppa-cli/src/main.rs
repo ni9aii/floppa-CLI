@@ -471,7 +471,11 @@ async fn main() -> Result<()> {
         } => {
             stop::stop(&interface, pid, force)?;
         }
-        Command::Service { scope, name, command } => {
+        Command::Service {
+            scope,
+            name,
+            command,
+        } => {
             handle_service_command(scope, name, command)?;
         }
         Command::Logout => {

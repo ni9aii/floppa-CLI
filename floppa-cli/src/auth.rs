@@ -53,7 +53,9 @@ fn load_token_from(path: &std::path::Path) -> Result<Option<String>> {
             .context("Failed to read token file")?
             .trim()
             .to_string();
-        if token.is_empty() { return Ok(None); }
+        if token.is_empty() {
+            return Ok(None);
+        }
         Ok(Some(token))
     } else {
         Ok(None)

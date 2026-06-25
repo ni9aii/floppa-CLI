@@ -1,4 +1,4 @@
-use crate::net::{NetworkState, get_default_gateway, run_ip, route_exists};
+use crate::net::{NetworkState, get_default_gateway, route_exists, run_ip};
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
