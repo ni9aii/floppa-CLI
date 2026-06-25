@@ -69,8 +69,8 @@ enum Command {
         #[arg(long)]
         config: Option<String>,
         /// Protocol: wireguard (default), amneziawg, or vless
-        #[arg(long, default_value = "wireguard")]
-        protocol: String,
+        #[arg(long, default_value = "wireguard", value_enum)]
+        protocol: Protocol,
         /// TUN interface name
         #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
         interface: String,
@@ -103,8 +103,8 @@ enum Command {
     /// Fetch and print config (WireGuard/AmneziaWG .conf or VLESS URI)
     Config {
         /// Protocol: wireguard (default), amneziawg, or vless
-        #[arg(long, default_value = "wireguard")]
-        protocol: String,
+        #[arg(long, default_value = "wireguard", value_enum)]
+        protocol: Protocol,
         /// Peer ID (WireGuard/AmneziaWG only; uses first active peer of that protocol if omitted)
         #[arg(long)]
         peer_id: Option<i64>,
@@ -152,8 +152,8 @@ enum ServiceCommand {
         #[arg(long)]
         binary: Option<PathBuf>,
         /// Protocol passed to `connect`
-        #[arg(long, default_value = "amneziawg")]
-        protocol: String,
+        #[arg(long, default_value = "amneziawg", value_enum)]
+        protocol: Protocol,
         /// TUN interface name
         #[arg(long, default_value = tunnel::DEFAULT_INTERFACE_NAME)]
         interface: String,
@@ -226,6 +226,26 @@ enum DeviceCommand {
 
 fn is_vless(config_str: &str) -> bool {
     config_str.trim().starts_with("vless://")
+}
+
+#[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
+enum Protocol {
+    #[value(name = "wireguard")]
+    WireGuard,
+    #[value(name = "amneziawg")]
+    AmneziaWg,
+    #[value(name = "vless")]
+    Vless,
+}
+
+impl Protocol {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Protocol::WireGuard => "wireguard",
+            Protocol::AmneziaWg => "amneziawg",
+            Protocol::Vless => "vless",
+        }
+    }
 }
 
 #[tokio::main]
@@ -304,10 +324,10 @@ async fn main() -> Result<()> {
                     } else {
                         bail!("No active subscription");
                     }
-                    if protocol == "vless" {
+                    if protocol == Protocol::Vless {
                         client.get_vless_config().await?
                     } else {
-                        client.find_or_create_peer(&protocol).await?
+                        client.find_or_create_peer(protocol.as_str()).await?
                     }
                 }
             };
@@ -431,12 +451,12 @@ async fn main() -> Result<()> {
             let token =
                 auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
             let client = api::ApiClient::new(&api_url, &token);
-            let config = if protocol == "vless" {
+            let config = if protocol == Protocol::Vless {
                 client.get_vless_config().await?
             } else {
                 match peer_id {
                     Some(id) => client.get_peer_config(id).await?,
-                    None => client.find_or_create_peer(&protocol).await?,
+                    None => client.find_or_create_peer(protocol.as_str()).await?,
                 }
             };
             print!("{config}");
@@ -496,7 +516,7 @@ fn handle_service_command(
                 scope,
                 name,
                 binary,
-                protocol,
+                protocol: protocol.as_str().to_string(),
                 interface,
                 no_dns,
                 api_url,
