@@ -162,7 +162,7 @@ enum ServiceCommand {
         no_dns: bool,
         /// Static WireGuard/AmneziaWG .conf file; if set, skips API fetch at startup
         #[arg(long)]
-        config: Option<PathBuf>,
+        config: Option<String>,
         /// API URL passed to `connect`
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
@@ -574,7 +574,7 @@ fn handle_service_command(
                 protocol: protocol.as_str().to_string(),
                 interface,
                 no_dns,
-                config,
+                config: config.map(PathBuf::from),
                 api_url,
                 user,
                 home,
