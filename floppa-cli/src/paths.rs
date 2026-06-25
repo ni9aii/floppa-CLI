@@ -1,9 +1,26 @@
+use anyhow::{Context, Result};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const LOCAL_BIN: &str = ".local/bin";
+
+/// Returns `$XDG_CONFIG_HOME/floppa-cli` (or `~/.config/floppa-cli`),
+/// creating it with mode 0700 if it does not exist.
+pub fn floppa_config_dir() -> Result<PathBuf> {
+    let dir = dirs::config_dir()
+        .context("Cannot determine config directory")?
+        .join("floppa-cli");
+    fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(dir)
+}
 
 pub fn configure_process_path() {
     unsafe {

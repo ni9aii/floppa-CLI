@@ -7,6 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::api::ApiClient;
+use crate::paths::floppa_config_dir;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum LoginMethod {
@@ -16,16 +17,8 @@ pub enum LoginMethod {
     Account,
 }
 
-fn config_dir() -> Result<PathBuf> {
-    let dir = dirs::config_dir()
-        .ok_or_else(|| anyhow!("Cannot determine config directory"))?
-        .join("floppa-cli");
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
 fn token_path() -> Result<PathBuf> {
-    Ok(config_dir()?.join("token"))
+    Ok(floppa_config_dir()?.join("token"))
 }
 
 pub fn load_token() -> Result<Option<String>> {
@@ -46,13 +39,22 @@ pub fn load_token() -> Result<Option<String>> {
 
 fn save_token(token: &str) -> Result<()> {
     let path = token_path()?;
-    fs::write(&path, token).context("Failed to save token")?;
-    // Restrict permissions
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .context("Failed to create token file")?
+            .write_all(token.as_bytes())
+            .context("Failed to write token")?;
     }
+    #[cfg(not(unix))]
+    fs::write(&path, token).context("Failed to save token")?;
     Ok(())
 }
 
@@ -240,12 +242,16 @@ async fn wait_for_callback(listener: TcpListener) -> Result<String> {
 }
 
 fn urlencoding(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-            _ => format!("%{:02X}", c as u8),
-        })
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char);
+            }
+            b => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

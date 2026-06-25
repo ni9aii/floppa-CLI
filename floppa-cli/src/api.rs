@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::fs;
+
+use crate::paths::floppa_config_dir;
 
 pub struct ApiClient {
     client: reqwest::Client,
@@ -404,17 +406,8 @@ impl ApiClient {
     }
 }
 
-fn config_dir() -> Result<PathBuf> {
-    let dir = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|p| p.join("floppa-cli")))
-        .context("Failed to locate config directory")?;
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
 pub fn get_or_create_device_identity() -> Result<DeviceIdentity> {
-    let path = config_dir()?.join("device.json");
+    let path = floppa_config_dir()?.join("device.json");
     if let Ok(raw) = fs::read_to_string(&path) {
         let identity: DeviceIdentity = serde_json::from_str(&raw)
             .with_context(|| format!("Failed to parse device identity file: {}", path.display()))?;
@@ -434,7 +427,7 @@ pub fn get_or_create_device_identity() -> Result<DeviceIdentity> {
 }
 
 pub fn reset_device_identity() -> Result<DeviceIdentity> {
-    let path = config_dir()?.join("device.json");
+    let path = floppa_config_dir()?.join("device.json");
     let identity = DeviceIdentity {
         device_id: random_device_id(),
         device_name: hostname(),
