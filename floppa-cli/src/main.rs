@@ -254,7 +254,11 @@ where
         match op().await {
             Ok(v) => return Ok(v),
             Err(e) if is_retryable(&e) => {
-                eprintln!("Network error (attempt {}/{}): {e:#}", attempt + 1, delays_secs.len() + 1);
+                eprintln!(
+                    "Network error (attempt {}/{}): {e:#}",
+                    attempt + 1,
+                    delays_secs.len() + 1
+                );
                 eprintln!("Retrying in {delay}s...");
                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
             }
@@ -759,11 +763,7 @@ mod tests {
     #[tokio::test]
     async fn is_network_error_true_for_connection_refused() {
         let client = reqwest::Client::new();
-        let err = client
-            .get("http://127.0.0.1:1/")
-            .send()
-            .await
-            .unwrap_err();
+        let err = client.get("http://127.0.0.1:1/").send().await.unwrap_err();
         assert!(is_network_error(&anyhow::Error::from(err)));
     }
 
@@ -777,13 +777,17 @@ mod tests {
     async fn retry_succeeds_on_first_attempt() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let calls2 = calls.clone();
-        let result = retry_with_backoff(&[], |_| true, || {
-            let c = calls2.clone();
-            async move {
-                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Ok::<i32, anyhow::Error>(42)
-            }
-        })
+        let result = retry_with_backoff(
+            &[],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok::<i32, anyhow::Error>(42)
+                }
+            },
+        )
         .await;
         assert_eq!(result.unwrap(), 42);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -793,17 +797,21 @@ mod tests {
     async fn retry_succeeds_on_nth_attempt() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let calls2 = calls.clone();
-        let result = retry_with_backoff(&[0u64, 0], |_| true, || {
-            let c = calls2.clone();
-            async move {
-                let n = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                if n < 2 {
-                    Err::<i32, _>(anyhow::anyhow!("transient"))
-                } else {
-                    Ok(99)
+        let result = retry_with_backoff(
+            &[0u64, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    let n = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n < 2 {
+                        Err::<i32, _>(anyhow::anyhow!("transient"))
+                    } else {
+                        Ok(99)
+                    }
                 }
-            }
-        })
+            },
+        )
         .await;
         assert_eq!(result.unwrap(), 99);
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
@@ -813,13 +821,17 @@ mod tests {
     async fn retry_gives_up_after_all_delays_exhausted() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let calls2 = calls.clone();
-        let result = retry_with_backoff(&[0u64, 0, 0], |_| true, || {
-            let c = calls2.clone();
-            async move {
-                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err::<i32, _>(anyhow::anyhow!("always fails"))
-            }
-        })
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("always fails"))
+                }
+            },
+        )
         .await;
         assert!(result.is_err());
         // delays.len() + 1 = 3 + 1 = 4 total attempts
@@ -830,16 +842,19 @@ mod tests {
     async fn retry_stops_immediately_on_non_retryable_error() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let calls2 = calls.clone();
-        let result = retry_with_backoff(&[0u64, 0, 0], |_| false, || {
-            let c = calls2.clone();
-            async move {
-                c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                Err::<i32, _>(anyhow::anyhow!("auth error"))
-            }
-        })
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| false,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("auth error"))
+                }
+            },
+        )
         .await;
         assert!(result.is_err());
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
-
