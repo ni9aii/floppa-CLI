@@ -17,12 +17,6 @@ pub fn floppa_config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-pub fn configure_process_path() {
-    unsafe {
-        env::set_var("PATH", configured_path());
-    }
-}
-
 pub fn command(program: &str) -> Command {
     let mut cmd = Command::new(program);
     cmd.env("PATH", configured_path());

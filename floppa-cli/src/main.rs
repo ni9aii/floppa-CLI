@@ -250,8 +250,6 @@ impl Protocol {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    paths::configure_process_path();
-
     let cli = Cli::parse();
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
