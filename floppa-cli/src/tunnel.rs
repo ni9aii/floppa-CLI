@@ -386,6 +386,12 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let endpoint = config.peer_socket_addr().await?;
     let allowed_ips = config.allowed_ips_networks();
 
+    // Remove a stale interface left by a previous session (e.g. after a crash).
+    if interface_exists(interface) {
+        eprintln!("Removing stale {interface} interface from previous session...");
+        run_ip(&["link", "del", interface])?;
+    }
+
     let mut tun_config = tun::Configuration::default();
     tun_config.tun_name(interface).mtu(config.mtu());
     let tun_device = tun::create_as_async(&tun_config)?;
