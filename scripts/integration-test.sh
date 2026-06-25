@@ -60,7 +60,7 @@ cleanup() {
   sudo systemctl daemon-reload 2>/dev/null || true
   sudo ip link del "$ITG_IFACE" 2>/dev/null || true
   sudo userdel "$ITG_USER"  2>/dev/null || true
-  sudo rm -rf "$ITG_CONF_DIR" "$ITG_HOME" "$ITG_LOG"
+  sudo rm -rf "$ITG_CONF_DIR" "$ITG_HOME" "$ITG_LOG" "$ITG_BINARY"
 }
 trap cleanup EXIT
 
@@ -68,6 +68,11 @@ trap cleanup EXIT
 
 echo "=== Setup ==="
 [ -f "$BINARY" ] || die "Binary not found at $BINARY — run 'cargo build --release -p floppa-cli' first"
+
+# Copy binary to a world-accessible path so the service user can execute it.
+ITG_BINARY="/usr/local/bin/floppa-itg-test"
+sudo cp "$BINARY" "$ITG_BINARY"
+sudo chmod 755 "$ITG_BINARY"
 
 sudo modprobe tun 2>/dev/null || true
 
@@ -93,7 +98,7 @@ EOF
 install_svc() {
   local cfg="$1"
   sudo "$BINARY" service --scope system --name "$ITG_SVC" install \
-    --binary   "$BINARY"    \
+    --binary   "$ITG_BINARY" \
     --protocol wireguard    \
     --interface "$ITG_IFACE" \
     --user     "$ITG_USER"  \
