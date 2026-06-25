@@ -221,6 +221,8 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
         "Description=Floppa VPN tunnel managed by floppa-cli".to_string(),
         "After=network-online.target".to_string(),
         "Wants=network-online.target".to_string(),
+        "StartLimitIntervalSec=300".to_string(),
+        "StartLimitBurst=10".to_string(),
         String::new(),
         "[Service]".to_string(),
         "Type=simple".to_string(),
@@ -234,6 +236,10 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
 
     lines.extend([
         exec_start,
+        format!(
+            "ExecStopPost=-/bin/sh -c 'ip link del {} 2>/dev/null || true'",
+            opts.interface
+        ),
         "Restart=on-failure".to_string(),
         "RestartSec=5s".to_string(),
         "SuccessExitStatus=0 130 143".to_string(),
@@ -420,6 +426,9 @@ mod tests {
             "ExecStart=/srv/floppa-test/bin/floppa-cli connect --protocol amneziawg --interface floppa0 --no-dns --log-file /srv/floppa-test/home/test-user/.local/state/floppa-cli/floppa-cli.log"
         );
         assert!(unit.contains("AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW"));
+        assert!(unit.contains("StartLimitIntervalSec=300"));
+        assert!(unit.contains("StartLimitBurst=10"));
+        assert!(unit.contains("ExecStopPost=-/bin/sh -c 'ip link del floppa0 2>/dev/null || true'"));
     }
 
     #[test]
