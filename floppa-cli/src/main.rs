@@ -1,6 +1,7 @@
 mod api;
 mod auth;
 mod dns;
+mod net;
 mod paths;
 mod service;
 mod stop;
@@ -553,19 +554,19 @@ struct CleanupKind {
 }
 
 enum CleanupTunnel {
-    WireGuard(tunnel::NetworkState),
-    Vless(vless::NetworkState),
+    WireGuard(net::NetworkState),
+    Vless(net::NetworkState),
 }
 
 impl CleanupKind {
-    fn wireguard(state: tunnel::NetworkState, dns: bool) -> Self {
+    fn wireguard(state: net::NetworkState, dns: bool) -> Self {
         Self {
             dns,
             tunnel: CleanupTunnel::WireGuard(state),
         }
     }
 
-    fn vless(state: vless::NetworkState, dns: bool) -> Self {
+    fn vless(state: net::NetworkState, dns: bool) -> Self {
         Self {
             dns,
             tunnel: CleanupTunnel::Vless(state),
@@ -579,17 +580,12 @@ impl CleanupKind {
             eprintln!("DNS restore failed: {e}");
         }
 
-        match &self.tunnel {
-            CleanupTunnel::WireGuard(state) => {
-                if let Err(e) = tunnel::cleanup_networking(state) {
-                    eprintln!("Tunnel cleanup failed: {e}");
-                }
-            }
-            CleanupTunnel::Vless(state) => {
-                if let Err(e) = vless::cleanup_networking(state) {
-                    eprintln!("VLESS cleanup failed: {e}");
-                }
-            }
+        let state = match &self.tunnel {
+            CleanupTunnel::WireGuard(s) => s,
+            CleanupTunnel::Vless(s) => s,
+        };
+        if let Err(e) = net::cleanup_networking(state) {
+            eprintln!("Tunnel cleanup failed: {e}");
         }
     }
 }
@@ -600,7 +596,7 @@ async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> R
     let device = tunnel::create_tunnel(&wg_config, interface).await?;
     eprintln!("Configuring networking...");
     let network_state = tunnel::configure_networking(&wg_config, interface).await?;
-    tunnel::verify_networking(&network_state)?;
+    net::verify_networking(&network_state)?;
 
     let mut cleanup = CleanupKind::wireguard(network_state, !no_dns);
     if !no_dns {
@@ -629,7 +625,7 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
 
     eprintln!("Configuring networking...");
     let network_state = vless::configure_networking(&config, interface).await?;
-    vless::verify_networking(&network_state)?;
+    net::verify_networking(&network_state)?;
 
     let mut cleanup = CleanupKind::vless(network_state, !no_dns);
     if !no_dns {
