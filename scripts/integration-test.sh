@@ -98,7 +98,7 @@ install_svc() {
     --interface "$ITG_IFACE" \
     --user     "$ITG_USER"  \
     --home     "$ITG_HOME"  \
-    --log-file "$ITG_LOG"   \
+    --service-log-file "$ITG_LOG"   \
     --config   "$cfg"
   sudo systemctl daemon-reload
 }

@@ -173,8 +173,8 @@ enum ServiceCommand {
         #[arg(long, env = "HOME")]
         home: Option<PathBuf>,
         /// Absolute path to the service log file
-        #[arg(long)]
-        log_file: Option<PathBuf>,
+        #[arg(long = "service-log-file")]
+        svc_log_file: Option<PathBuf>,
     },
     /// Remove an installed systemd unit
     Uninstall,
@@ -552,13 +552,13 @@ fn handle_service_command(
             api_url,
             user,
             home,
-            log_file,
+            svc_log_file,
         } => {
             let home = home.unwrap_or_else(default_home);
             let user = user
                 .or_else(|| std::env::var("USER").ok())
                 .unwrap_or_default();
-            let log_file = log_file.unwrap_or_else(|| {
+            let log_file = svc_log_file.unwrap_or_else(|| {
                 home.join(".local")
                     .join("state")
                     .join("floppa-cli")
