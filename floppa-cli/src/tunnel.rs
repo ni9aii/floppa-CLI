@@ -338,7 +338,9 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
     let endpoint = config.peer_socket_addr().await?;
     let endpoint_route = get_default_gateway()?
         .map(|gateway| {
-            let route = format!("{}/32", endpoint.ip());
+            let ip = endpoint.ip();
+            let prefix = if ip.is_ipv4() { 32 } else { 128 };
+            let route = format!("{ip}/{prefix}");
             run_ip(&["route", "replace", &route, "via", &gateway])?;
             eprintln!("Endpoint route: {route} via {gateway}");
             Ok::<_, anyhow::Error>((route, gateway))
