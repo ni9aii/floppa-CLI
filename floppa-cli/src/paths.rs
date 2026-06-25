@@ -10,7 +10,7 @@ const LOCAL_BIN: &str = ".local/bin";
 pub fn floppa_config_dir() -> Result<PathBuf> {
     let dir = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| dirs::config_dir())
+        .or_else(dirs::config_dir)
         .context("Cannot determine config directory")?
         .join("floppa-cli");
     std::fs::create_dir_all(&dir)?;
