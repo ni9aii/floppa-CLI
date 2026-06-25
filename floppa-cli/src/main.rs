@@ -130,6 +130,12 @@ enum Command {
     },
     /// Install and manage a systemd service for the VPN tunnel
     Service {
+        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
+        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
+        scope: service::ServiceScope,
+        /// Service name without `.service`
+        #[arg(long, default_value = "floppa-cli")]
+        name: String,
         #[command(subcommand)]
         command: ServiceCommand,
     },
@@ -141,12 +147,6 @@ enum Command {
 enum ServiceCommand {
     /// Install a systemd unit for `floppa-cli connect`
     Install {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
         /// Absolute path to the floppa-cli binary
         #[arg(long)]
         binary: Option<PathBuf>,
@@ -173,68 +173,19 @@ enum ServiceCommand {
         log_file: Option<PathBuf>,
     },
     /// Remove an installed systemd unit
-    Uninstall {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Uninstall,
     /// Start the systemd service
-    Start {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Start,
     /// Stop the systemd service
-    Stop {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Stop,
     /// Restart the systemd service
-    Restart {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Restart,
     /// Show systemd service status
-    Status {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Status,
     /// Enable the systemd service at boot
-    Enable {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Enable,
     /// Disable the systemd service at boot
-    Disable {
-        /// Service scope: system (`sudo systemctl`) or user (`systemctl --user`)
-        #[arg(long, value_enum, default_value_t = service::ServiceScope::System)]
-        scope: service::ServiceScope,
-        /// Service name without `.service`
-        #[arg(long, default_value = "floppa-cli")]
-        name: String,
-    },
+    Disable,
 }
 
 #[derive(Subcommand)]
@@ -499,8 +450,8 @@ async fn main() -> Result<()> {
         } => {
             stop::stop(&interface, pid, force)?;
         }
-        Command::Service { command } => {
-            handle_service_command(command)?;
+        Command::Service { scope, name, command } => {
+            handle_service_command(scope, name, command)?;
         }
         Command::Logout => {
             auth::logout()?;
@@ -511,11 +462,13 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_service_command(command: ServiceCommand) -> Result<()> {
+fn handle_service_command(
+    scope: service::ServiceScope,
+    name: String,
+    command: ServiceCommand,
+) -> Result<()> {
     match command {
         ServiceCommand::Install {
-            scope,
-            name,
             binary,
             protocol,
             interface,
@@ -551,49 +504,39 @@ fn handle_service_command(command: ServiceCommand) -> Result<()> {
                 log_file,
             })
         }
-        ServiceCommand::Uninstall { scope, name } => {
+        ServiceCommand::Uninstall => {
             service::uninstall(&service::ServiceUninstallOptions { scope, name })
         }
-        ServiceCommand::Start { scope, name } => {
-            service::control(&service::ServiceControlOptions {
-                scope,
-                name,
-                action: service::ServiceAction::Start,
-            })
-        }
-        ServiceCommand::Stop { scope, name } => service::control(&service::ServiceControlOptions {
+        ServiceCommand::Start => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Start,
+        }),
+        ServiceCommand::Stop => service::control(&service::ServiceControlOptions {
             scope,
             name,
             action: service::ServiceAction::Stop,
         }),
-        ServiceCommand::Restart { scope, name } => {
-            service::control(&service::ServiceControlOptions {
-                scope,
-                name,
-                action: service::ServiceAction::Restart,
-            })
-        }
-        ServiceCommand::Status { scope, name } => {
-            service::control(&service::ServiceControlOptions {
-                scope,
-                name,
-                action: service::ServiceAction::Status,
-            })
-        }
-        ServiceCommand::Enable { scope, name } => {
-            service::control(&service::ServiceControlOptions {
-                scope,
-                name,
-                action: service::ServiceAction::Enable,
-            })
-        }
-        ServiceCommand::Disable { scope, name } => {
-            service::control(&service::ServiceControlOptions {
-                scope,
-                name,
-                action: service::ServiceAction::Disable,
-            })
-        }
+        ServiceCommand::Restart => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Restart,
+        }),
+        ServiceCommand::Status => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Status,
+        }),
+        ServiceCommand::Enable => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Enable,
+        }),
+        ServiceCommand::Disable => service::control(&service::ServiceControlOptions {
+            scope,
+            name,
+            action: service::ServiceAction::Disable,
+        }),
     }
 }
 
