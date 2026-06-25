@@ -481,16 +481,19 @@ fn handle_service_command(
             let home = home.unwrap_or_else(default_home);
             let user = user
                 .or_else(|| std::env::var("USER").ok())
-                .unwrap_or_default();
+                .filter(|u| !u.is_empty())
+                .context("Cannot determine service user: set --user or $USER")?;
             let log_file = log_file.unwrap_or_else(|| {
                 home.join(".local")
                     .join("state")
                     .join("floppa-cli")
                     .join("floppa-cli.log")
             });
-            let binary = binary.unwrap_or_else(|| {
-                std::env::current_exe().unwrap_or_else(|_| PathBuf::from("floppa-cli"))
-            });
+            let binary = binary
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    std::env::current_exe().context("Cannot determine binary path; use --binary")
+                })?;
             service::install(&service::ServiceInstallOptions {
                 scope,
                 name,
@@ -550,6 +553,7 @@ fn default_home() -> PathBuf {
 struct CleanupKind {
     dns: bool,
     tunnel: CleanupTunnel,
+    cleaned: bool,
 }
 
 enum CleanupTunnel {
@@ -562,6 +566,7 @@ impl CleanupKind {
         Self {
             dns,
             tunnel: CleanupTunnel::WireGuard(state),
+            cleaned: false,
         }
     }
 
@@ -569,10 +574,16 @@ impl CleanupKind {
         Self {
             dns,
             tunnel: CleanupTunnel::Vless(state),
+            cleaned: false,
         }
     }
 
     fn cleanup(&mut self) {
+        if self.cleaned {
+            return;
+        }
+        self.cleaned = true;
+
         if self.dns
             && let Err(e) = dns::restore_dns()
         {
@@ -591,6 +602,12 @@ impl CleanupKind {
                 }
             }
         }
+    }
+}
+
+impl Drop for CleanupKind {
+    fn drop(&mut self) {
+        self.cleanup();
     }
 }
 
