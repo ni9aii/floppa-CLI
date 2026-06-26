@@ -21,6 +21,7 @@ pub struct ServiceInstallOptions {
     pub protocol: String,
     pub interface: String,
     pub no_dns: bool,
+    pub config: Option<PathBuf>,
     pub api_url: String,
     pub user: String,
     pub home: PathBuf,
@@ -193,6 +194,11 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
         PathBuf::from("--interface"),
         PathBuf::from(&opts.interface),
     ];
+    if let Some(ref cfg) = opts.config {
+        validate_absolute_path("config", cfg)?;
+        exec_args.push(PathBuf::from("--config"));
+        exec_args.push(cfg.clone());
+    }
     // System-scoped services run as non-root with only CAP_NET_ADMIN/CAP_NET_RAW —
     // writing /etc/resolv.conf requires DAC_OVERRIDE which is absent by design.
     // Force --no-dns for system scope to prevent a crash loop on every start.
@@ -401,6 +407,7 @@ mod tests {
             protocol: "amneziawg".to_string(),
             interface: "floppa0".to_string(),
             no_dns: true,
+            config: None,
             api_url: DEFAULT_API_URL.to_string(),
             user: "test-user".to_string(),
             home: PathBuf::from("/srv/floppa-test/home/test-user"),
@@ -593,5 +600,43 @@ mod tests {
     #[test]
     fn quote_systemd_arg_with_dollar() {
         assert_eq!(quote_systemd_arg("$HOME"), "'$HOME'");
+    }
+
+    #[test]
+    fn renders_config_arg_when_set() {
+        let mut opts = service_options(ServiceScope::System);
+        opts.config = Some(PathBuf::from("/etc/floppa-test/peer.conf"));
+
+        let unit = render_unit(&opts).unwrap();
+        let exec_start = unit
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .expect("ExecStart line");
+
+        assert!(
+            exec_start.contains("--config /etc/floppa-test/peer.conf"),
+            "ExecStart should contain --config: {exec_start}"
+        );
+    }
+
+    #[test]
+    fn renders_no_config_arg_when_absent() {
+        let unit = render_unit(&service_options(ServiceScope::System)).unwrap();
+        let exec_start = unit
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .expect("ExecStart line");
+
+        assert!(
+            !exec_start.contains("--config"),
+            "ExecStart should not contain --config: {exec_start}"
+        );
+    }
+
+    #[test]
+    fn rejects_relative_config_path() {
+        let mut opts = service_options(ServiceScope::System);
+        opts.config = Some(PathBuf::from("relative/peer.conf"));
+        assert!(render_unit(&opts).is_err());
     }
 }
