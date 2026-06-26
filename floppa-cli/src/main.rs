@@ -268,7 +268,11 @@ async fn fetch_config_from_api(api_url: &str, protocol: &str) -> Result<String> 
         match result {
             Ok(config) => return Ok(config),
             Err(e) if is_network_error(&e) => {
-                eprintln!("Network error (attempt {}/{}): {e:#}", attempt + 1, DELAYS.len() + 1);
+                eprintln!(
+                    "Network error (attempt {}/{}): {e:#}",
+                    attempt + 1,
+                    DELAYS.len() + 1
+                );
             }
             Err(e) => return Err(e),
         }

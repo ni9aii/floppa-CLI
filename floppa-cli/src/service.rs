@@ -428,7 +428,9 @@ mod tests {
         assert!(unit.contains("AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW"));
         assert!(unit.contains("StartLimitIntervalSec=300"));
         assert!(unit.contains("StartLimitBurst=10"));
-        assert!(unit.contains("ExecStopPost=-/bin/sh -c 'ip link del floppa0 2>/dev/null || true'"));
+        assert!(
+            unit.contains("ExecStopPost=-/bin/sh -c 'ip link del floppa0 2>/dev/null || true'")
+        );
     }
 
     #[test]
