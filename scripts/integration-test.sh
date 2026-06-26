@@ -158,19 +158,22 @@ install_svc /nonexistent/floppa-itg.conf
 
 sudo systemctl start "$ITG_SVC" 2>/dev/null || true
 
-# With StartLimitBurst=10 and default RestartSec=100ms, the limit fires in ~1s.
-# Allow 90s for slow CI environments.
+# systemd logs "Start request repeated too quickly" when StartLimitBurst is
+# exceeded. Poll the journal for this message — more reliable than SubState
+# which varies across systemd versions. Allow 150s for slow CI runners
+# (5s RestartSec × 10 bursts = 50s minimum, plus startup overhead).
 echo -n "Waiting for start-limit-hit..."
-end=$((SECONDS + 90))
-until [ "$(substate)" = "start-limit-hit" ]; do
+end=$((SECONDS + 150))
+until sudo journalctl -u "$ITG_SVC" -q --no-pager 2>/dev/null \
+      | grep -q "repeated too quickly\|start-limit-hit"; do
   if (( SECONDS >= end )); then
     echo ""
     echo "Last SubState: $(substate)"
-    sudo journalctl -u "$ITG_SVC" -n 30 --no-pager 2>/dev/null || true
-    die "start-limit-hit not reached (timeout 90s)"
+    sudo journalctl -u "$ITG_SVC" -n 40 --no-pager 2>/dev/null || true
+    die "start-limit-hit not reached (timeout 150s)"
   fi
   echo -n "."
-  sleep 1
+  sleep 2
 done
 echo ""
 
