@@ -228,6 +228,75 @@ fn is_vless(config_str: &str) -> bool {
     config_str.trim().starts_with("vless://")
 }
 
+fn is_network_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|re| re.is_connect() || re.is_timeout())
+    })
+}
+
+async fn fetch_config_from_api(api_url: &str, protocol: &str) -> Result<String> {
+    const DELAYS: &[u64] = &[10, 20, 40, 60, 60];
+
+    let token = auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+    let client = api::ApiClient::new(api_url, &token);
+
+    for (attempt, &delay) in DELAYS.iter().enumerate() {
+        if attempt > 0 {
+            eprintln!("API unreachable, retrying in {delay}s...");
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        }
+
+        let result = async {
+            let me = client.get_me().await.context("Failed to reach API")?;
+            if let Some(ref sub) = me.subscription {
+                eprintln!(
+                    "Plan: {} (speed limit: {})",
+                    sub.plan_name,
+                    sub.speed_limit_mbps
+                        .map(|s| format!("{s} Mbps"))
+                        .unwrap_or_else(|| "unlimited".into())
+                );
+            } else {
+                bail!("No active subscription");
+            }
+            client.find_or_create_peer(protocol).await
+        }
+        .await;
+
+        match result {
+            Ok(config) => return Ok(config),
+            Err(e) if is_network_error(&e) => {
+                eprintln!(
+                    "Network error (attempt {}/{}): {e:#}",
+                    attempt + 1,
+                    DELAYS.len() + 1
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // Final attempt (no delay, just propagate the error)
+    let me = client
+        .get_me()
+        .await
+        .context("Failed to reach API after multiple retries")?;
+    if let Some(ref sub) = me.subscription {
+        eprintln!(
+            "Plan: {} (speed limit: {})",
+            sub.plan_name,
+            sub.speed_limit_mbps
+                .map(|s| format!("{s} Mbps"))
+                .unwrap_or_else(|| "unlimited".into())
+        );
+    } else {
+        bail!("No active subscription");
+    }
+    client.find_or_create_peer(protocol).await
+}
+
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 enum Protocol {
     #[value(name = "wireguard")]
@@ -307,25 +376,13 @@ async fn main() -> Result<()> {
                 Some(path) => std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {path}"))?,
                 None => {
-                    let token = auth::load_token()?
-                        .context("Not logged in. Run `floppa-cli login` first.")?;
-                    let client = api::ApiClient::new(&api_url, &token);
-                    let me = client.get_me().await?;
-                    if let Some(ref sub) = me.subscription {
-                        eprintln!(
-                            "Plan: {} (speed limit: {})",
-                            sub.plan_name,
-                            sub.speed_limit_mbps
-                                .map(|s| format!("{s} Mbps"))
-                                .unwrap_or_else(|| "unlimited".into())
-                        );
-                    } else {
-                        bail!("No active subscription");
-                    }
                     if protocol == Protocol::Vless {
+                        let token = auth::load_token()?
+                            .context("Not logged in. Run `floppa-cli login` first.")?;
+                        let client = api::ApiClient::new(&api_url, &token);
                         client.get_vless_config().await?
                     } else {
-                        client.find_or_create_peer(protocol.as_str()).await?
+                        fetch_config_from_api(&api_url, protocol.as_str()).await?
                     }
                 }
             };
