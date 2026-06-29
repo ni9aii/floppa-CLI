@@ -334,21 +334,29 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
         .transpose()?;
 
     // Add routes for allowed IPs. Use `replace` for idempotent restarts.
+    let mut added_routes = Vec::new();
     for network in config.allowed_ips_networks() {
         if network.prefix() == 0 {
             if network.is_ipv4() {
                 run_ip(&["route", "replace", "0.0.0.0/1", "dev", interface])?;
                 run_ip(&["route", "replace", "128.0.0.0/1", "dev", interface])?;
+                added_routes.push("0.0.0.0/1".to_string());
+                added_routes.push("128.0.0.0/1".to_string());
             } else {
                 if let Err(e) = run_ip(&["route", "replace", "::/1", "dev", interface]) {
                     eprintln!("Skipping IPv6 VPN route ::/1: {e}");
+                } else {
+                    added_routes.push("::/1".to_string());
                 }
                 if let Err(e) = run_ip(&["route", "replace", "8000::/1", "dev", interface]) {
                     eprintln!("Skipping IPv6 VPN route 8000::/1: {e}");
+                } else {
+                    added_routes.push("8000::/1".to_string());
                 }
             }
         } else {
             run_ip(&["route", "replace", &network.to_string(), "dev", interface])?;
+            added_routes.push(network.to_string());
         }
     }
 
@@ -360,6 +368,7 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
         interface: interface.to_string(),
         endpoint_route: endpoint_route.as_ref().map(|(route, _)| route.clone()),
         endpoint_gateway: endpoint_route.as_ref().map(|(_, gateway)| gateway.clone()),
+        added_routes,
     })
 }
 
