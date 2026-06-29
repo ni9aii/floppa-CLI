@@ -447,8 +447,7 @@ pub fn interface_exists(interface: &str) -> bool {
 
 /// Poll gotatun peer stats until a WireGuard handshake is confirmed or `timeout` elapses.
 pub async fn verify_handshake(device: &FloppaDevice, timeout_secs: u64) -> Result<()> {
-    let deadline =
-        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
     loop {
         let handshook = device
             .read(async |dr| {
@@ -534,8 +533,7 @@ mod tests {
     #[test]
     fn parse_wg_dump_peer_valid_line() {
         // Format: pubkey \t psk \t endpoint \t allowed_ips \t handshake_epoch \t rx \t tx \t keepalive
-        let line =
-            "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t1700000000\t1048576\t2097152\t25";
+        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t1700000000\t1048576\t2097152\t25";
         let (endpoint, handshake_epoch, rx, tx) = parse_wg_dump_peer(line).unwrap();
         assert_eq!(endpoint, "1.2.3.4:51820");
         assert_eq!(handshake_epoch, 1700000000);
