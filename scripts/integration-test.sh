@@ -119,11 +119,13 @@ echo "=== Test A: routes on start ==="
 
 sudo systemctl start "$ITG_SVC"
 
-# Wait for the TUN interface to appear (gotatun creates it during tunnel setup)
-wait_for "$ITG_IFACE interface" 15 ip link show "$ITG_IFACE"
-
-ip route show | grep -q "0.0.0.0/1 dev $ITG_IFACE"   || die "0.0.0.0/1 route missing"
-ip route show | grep -q "128.0.0.0/1 dev $ITG_IFACE"  || die "128.0.0.0/1 route missing"
+# Wait until the VPN routes are present. The TUN device appears early in
+# create_tunnel() before configure_networking() adds routes, so waiting for
+# the interface alone races with route installation.
+wait_for "0.0.0.0/1 route on $ITG_IFACE" 15 \
+  sh -c "ip route show | grep -q '0.0.0.0/1 dev $ITG_IFACE'"
+wait_for "128.0.0.0/1 route on $ITG_IFACE" 5 \
+  sh -c "ip route show | grep -q '128.0.0.0/1 dev $ITG_IFACE'"
 
 echo "PASS: VPN split routes exist on $ITG_IFACE"
 
@@ -206,10 +208,10 @@ EOF
 install_svc "$ITG_SPLIT_CONF"
 sudo systemctl start "$ITG_SVC"
 
-wait_for "$ITG_IFACE interface" 15 ip link show "$ITG_IFACE"
-
-ip route show | grep -q "10.99.0.0/24 dev $ITG_IFACE" || die "10.99.0.0/24 split-tunnel route missing"
-ip route show | grep -q "10.99.1.0/24 dev $ITG_IFACE" || die "10.99.1.0/24 split-tunnel route missing"
+wait_for "10.99.0.0/24 route on $ITG_IFACE" 15 \
+  sh -c "ip route show | grep -q '10.99.0.0/24 dev $ITG_IFACE'"
+wait_for "10.99.1.0/24 route on $ITG_IFACE" 5 \
+  sh -c "ip route show | grep -q '10.99.1.0/24 dev $ITG_IFACE'"
 
 echo "PASS: split-tunnel routes exist on $ITG_IFACE"
 
