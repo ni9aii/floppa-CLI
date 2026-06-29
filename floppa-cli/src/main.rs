@@ -77,6 +77,9 @@ enum Command {
         /// Skip DNS configuration
         #[arg(long)]
         no_dns: bool,
+        /// Skip WireGuard handshake verification after connect (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
@@ -160,6 +163,9 @@ enum ServiceCommand {
         /// Skip DNS configuration
         #[arg(long)]
         no_dns: bool,
+        /// Skip WireGuard handshake verification in the service (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
         /// Static WireGuard/AmneziaWG .conf file; if set, skips API fetch at startup
         #[arg(long)]
         config: Option<String>,
@@ -365,6 +371,7 @@ async fn main() -> Result<()> {
             protocol,
             interface,
             no_dns,
+            skip_handshake_check,
             api_url,
         } => {
             let config_str = match config {
@@ -385,7 +392,7 @@ async fn main() -> Result<()> {
             if is_vless(&config_str) {
                 connect_vless(&config_str, &interface, no_dns).await?;
             } else {
-                connect_wireguard(&config_str, &interface, no_dns).await?;
+                connect_wireguard(&config_str, &interface, no_dns, skip_handshake_check).await?;
             }
         }
         Command::Peers { api_url } => {
@@ -548,6 +555,7 @@ fn handle_service_command(
             protocol,
             interface,
             no_dns,
+            skip_handshake_check,
             config,
             api_url,
             user,
@@ -574,6 +582,7 @@ fn handle_service_command(
                 protocol: protocol.as_str().to_string(),
                 interface,
                 no_dns,
+                skip_handshake_check,
                 config: config.map(PathBuf::from),
                 api_url,
                 user,
@@ -679,7 +688,12 @@ impl Drop for CleanupKind {
     }
 }
 
-async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> Result<()> {
+async fn connect_wireguard(
+    config_str: &str,
+    interface: &str,
+    no_dns: bool,
+    skip_handshake_check: bool,
+) -> Result<()> {
     let wg_config = tunnel::WgConfig::from_config_str(config_str)?;
     eprintln!("Creating WireGuard tunnel on {interface}...");
     let device = tunnel::create_tunnel(&wg_config, interface).await?;
@@ -693,7 +707,9 @@ async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> R
     }
 
     eprintln!("Waiting for WireGuard handshake...");
-    tunnel::verify_handshake(&device, 10).await?;
+    if !skip_handshake_check {
+        tunnel::verify_handshake(&device, 10).await?;
+    }
 
     println!("READY");
     eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");

@@ -21,6 +21,7 @@ pub struct ServiceInstallOptions {
     pub protocol: String,
     pub interface: String,
     pub no_dns: bool,
+    pub skip_handshake_check: bool,
     pub config: Option<PathBuf>,
     pub api_url: String,
     pub user: String,
@@ -205,6 +206,9 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
     let no_dns = opts.no_dns || opts.scope == ServiceScope::System;
     if no_dns {
         exec_args.push(PathBuf::from("--no-dns"));
+    }
+    if opts.skip_handshake_check {
+        exec_args.push(PathBuf::from("--skip-handshake-check"));
     }
     if opts.api_url != DEFAULT_API_URL {
         exec_args.push(PathBuf::from("--api-url"));
@@ -407,6 +411,7 @@ mod tests {
             protocol: "amneziawg".to_string(),
             interface: "floppa0".to_string(),
             no_dns: true,
+            skip_handshake_check: false,
             config: None,
             api_url: DEFAULT_API_URL.to_string(),
             user: "test-user".to_string(),
@@ -527,6 +532,21 @@ mod tests {
 
         let unit = render_unit(&opts).unwrap();
         assert!(unit.contains("--no-dns"));
+    }
+
+    #[test]
+    fn includes_skip_handshake_check_when_set() {
+        let mut opts = service_options(ServiceScope::User);
+        opts.skip_handshake_check = true;
+
+        let unit = render_unit(&opts).unwrap();
+        assert!(unit.contains("--skip-handshake-check"));
+    }
+
+    #[test]
+    fn omits_skip_handshake_check_by_default() {
+        let unit = render_unit(&service_options(ServiceScope::User)).unwrap();
+        assert!(!unit.contains("--skip-handshake-check"));
     }
 
     #[test]

@@ -396,14 +396,9 @@ fn wg_stats(interface: &str) {
     //   line 0: device info (private_key listen_port fwmark)
     //   line 1+: peer  psk  endpoint  allowed_ips  last_handshake_epoch  rx_bytes  tx_bytes  keepalive
     for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 7 {
+        let Some((endpoint, handshake_epoch, rx, tx)) = parse_wg_dump_peer(line) else {
             continue;
-        }
-        let endpoint = fields[2];
-        let handshake_epoch: u64 = fields[4].parse().unwrap_or(0);
-        let rx: u64 = fields[5].parse().unwrap_or(0);
-        let tx: u64 = fields[6].parse().unwrap_or(0);
+        };
         let handshake_str = if handshake_epoch == 0 {
             "none".to_string()
         } else {
@@ -415,6 +410,20 @@ fn wg_stats(interface: &str) {
             human_bytes(tx)
         );
     }
+}
+
+/// Parse one peer line from `wg show <iface> dump` output.
+/// Returns `(endpoint, last_handshake_epoch, rx_bytes, tx_bytes)` or `None` on malformed input.
+fn parse_wg_dump_peer(line: &str) -> Option<(String, u64, u64, u64)> {
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 7 {
+        return None;
+    }
+    let endpoint = fields[2].to_string();
+    let handshake_epoch: u64 = fields[4].parse().unwrap_or(0);
+    let rx: u64 = fields[5].parse().unwrap_or(0);
+    let tx: u64 = fields[6].parse().unwrap_or(0);
+    Some((endpoint, handshake_epoch, rx, tx))
 }
 
 fn human_bytes(b: u64) -> String {
@@ -507,4 +516,43 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let device = builder.build().await?;
 
     Ok(device)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_bytes_boundaries() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1024 * 1024), "1.0 MiB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024), "1.0 GiB");
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_valid_line() {
+        // Format: pubkey \t psk \t endpoint \t allowed_ips \t handshake_epoch \t rx \t tx \t keepalive
+        let line =
+            "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t1700000000\t1048576\t2097152\t25";
+        let (endpoint, handshake_epoch, rx, tx) = parse_wg_dump_peer(line).unwrap();
+        assert_eq!(endpoint, "1.2.3.4:51820");
+        assert_eq!(handshake_epoch, 1700000000);
+        assert_eq!(rx, 1048576);
+        assert_eq!(tx, 2097152);
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_no_handshake() {
+        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t0\t0\t0\t25";
+        let (_, handshake_epoch, _, _) = parse_wg_dump_peer(line).unwrap();
+        assert_eq!(handshake_epoch, 0);
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_short_line_returns_none() {
+        assert!(parse_wg_dump_peer("only\ttwo\tfields").is_none());
+        assert!(parse_wg_dump_peer("").is_none());
+    }
 }
