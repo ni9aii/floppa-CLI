@@ -1,7 +1,8 @@
 use crate::net::{NetworkState, get_default_gateway, route_exists, run_ip};
+use crate::paths;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
+use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer, uapi::UapiServer};
 use gotatun::tun::tun_async_device::TunDevice;
 use gotatun::udp::socket::UdpSocketFactory;
 use gotatun::x25519;
@@ -381,11 +382,99 @@ pub fn status(interface: &str) -> Result<()> {
         bail!("Floppa {interface}: interface exists, but VPN routes are missing");
     }
     println!("Floppa {interface}: connected");
+    wg_stats(interface);
     Ok(())
+}
+
+/// Print WireGuard peer stats via the UAPI socket if available (best-effort).
+fn wg_stats(interface: &str) {
+    let sock = format!("/var/run/wireguard/{interface}.sock");
+    if !std::path::Path::new(&sock).exists() {
+        return;
+    }
+    let Ok(out) = paths::command("wg")
+        .args(["show", interface, "dump"])
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    // `wg show <iface> dump` format (tab-separated):
+    //   line 0: device info (private_key listen_port fwmark)
+    //   line 1+: peer  psk  endpoint  allowed_ips  last_handshake_epoch  rx_bytes  tx_bytes  keepalive
+    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+        let Some((endpoint, handshake_epoch, rx, tx)) = parse_wg_dump_peer(line) else {
+            continue;
+        };
+        let handshake_str = if handshake_epoch == 0 {
+            "none".to_string()
+        } else {
+            format!("{}s ago", handshake_epoch)
+        };
+        println!(
+            "  peer: {endpoint}  handshake: {handshake_str}  rx: {}  tx: {}",
+            human_bytes(rx),
+            human_bytes(tx)
+        );
+    }
+}
+
+/// Parse one peer line from `wg show <iface> dump` output.
+/// Returns `(endpoint, last_handshake_epoch, rx_bytes, tx_bytes)` or `None` on malformed input.
+fn parse_wg_dump_peer(line: &str) -> Option<(String, u64, u64, u64)> {
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 7 {
+        return None;
+    }
+    let endpoint = fields[2].to_string();
+    let handshake_epoch: u64 = fields[4].parse().unwrap_or(0);
+    let rx: u64 = fields[5].parse().unwrap_or(0);
+    let tx: u64 = fields[6].parse().unwrap_or(0);
+    Some((endpoint, handshake_epoch, rx, tx))
+}
+
+fn human_bytes(b: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    if b >= GIB {
+        format!("{:.1} GiB", b as f64 / GIB as f64)
+    } else if b >= MIB {
+        format!("{:.1} MiB", b as f64 / MIB as f64)
+    } else if b >= KIB {
+        format!("{:.1} KiB", b as f64 / KIB as f64)
+    } else {
+        format!("{b} B")
+    }
 }
 
 pub fn interface_exists(interface: &str) -> bool {
     route_exists(&["link", "show", interface])
+}
+
+/// Poll gotatun peer stats until a WireGuard handshake is confirmed or `timeout` elapses.
+pub async fn verify_handshake(device: &FloppaDevice, timeout_secs: u64) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        let handshook = device
+            .read(async |dr| {
+                let peers = dr.peers().await;
+                peers.iter().any(|p| p.stats.last_handshake.is_some())
+            })
+            .await;
+        if handshook {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "WireGuard handshake timed out after {timeout_secs}s — \
+                 check server connectivity and credentials"
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
 }
 
 pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaDevice> {
@@ -423,6 +512,10 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
         .with_private_key(x25519::StaticSecret::from(private_key))
         .with_peer(peer);
 
+    if let Ok(uapi) = UapiServer::default_unix_socket(interface, None, None) {
+        builder = builder.with_uapi(uapi);
+    }
+
     // AmneziaWG: apply interface-wide obfuscation. Absent → plain WireGuard.
     if let Some(obf) = &config.obfuscation {
         builder = builder.with_awg(build_gotatun_awg(obf)?);
@@ -431,4 +524,42 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let device = builder.build().await?;
 
     Ok(device)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn human_bytes_boundaries() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1024 * 1024), "1.0 MiB");
+        assert_eq!(human_bytes(1024 * 1024 * 1024), "1.0 GiB");
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_valid_line() {
+        // Format: pubkey \t psk \t endpoint \t allowed_ips \t handshake_epoch \t rx \t tx \t keepalive
+        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t1700000000\t1048576\t2097152\t25";
+        let (endpoint, handshake_epoch, rx, tx) = parse_wg_dump_peer(line).unwrap();
+        assert_eq!(endpoint, "1.2.3.4:51820");
+        assert_eq!(handshake_epoch, 1700000000);
+        assert_eq!(rx, 1048576);
+        assert_eq!(tx, 2097152);
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_no_handshake() {
+        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t0\t0\t0\t25";
+        let (_, handshake_epoch, _, _) = parse_wg_dump_peer(line).unwrap();
+        assert_eq!(handshake_epoch, 0);
+    }
+
+    #[test]
+    fn parse_wg_dump_peer_short_line_returns_none() {
+        assert!(parse_wg_dump_peer("only\ttwo\tfields").is_none());
+        assert!(parse_wg_dump_peer("").is_none());
+    }
 }

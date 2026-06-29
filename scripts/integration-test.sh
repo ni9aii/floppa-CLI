@@ -104,6 +104,7 @@ install_svc() {
     --user     "$ITG_USER"  \
     --home     "$ITG_HOME"  \
     --service-log-file "$ITG_LOG"   \
+    --skip-handshake-check \
     --config   "$cfg"
   sudo systemctl daemon-reload
 }
@@ -178,6 +179,50 @@ done
 echo ""
 
 echo "PASS: StartLimitBurst prevented infinite crash-loop"
+
+# ─── Test D: split-tunnel routes are tracked and cleaned up ─────────────────
+
+echo ""
+echo "=== Test D: split-tunnel route cleanup ==="
+
+sudo systemctl reset-failed "$ITG_SVC" 2>/dev/null || true
+
+# Generate a split-tunnel config with specific (non-default) allowed IPs.
+# This exercises the added_routes tracking path — routes are not hardcoded
+# in cleanup_networking(), so a regression would leave them behind.
+ITG_SPLIT_CONF="$ITG_CONF_DIR/split.conf"
+sudo tee "$ITG_SPLIT_CONF" > /dev/null <<EOF
+[Interface]
+PrivateKey = $PRIV_KEY
+Address = 10.99.0.2/32
+
+[Peer]
+PublicKey = $PUB_KEY
+Endpoint = 192.0.2.1:51820
+AllowedIPs = 10.99.0.0/24, 10.99.1.0/24
+PersistentKeepalive = 25
+EOF
+
+install_svc "$ITG_SPLIT_CONF"
+sudo systemctl start "$ITG_SVC"
+
+wait_for "$ITG_IFACE interface" 15 ip link show "$ITG_IFACE"
+
+ip route show | grep -q "10.99.0.0/24 dev $ITG_IFACE" || die "10.99.0.0/24 split-tunnel route missing"
+ip route show | grep -q "10.99.1.0/24 dev $ITG_IFACE" || die "10.99.1.0/24 split-tunnel route missing"
+
+echo "PASS: split-tunnel routes exist on $ITG_IFACE"
+
+sudo systemctl kill --signal=SIGKILL "$ITG_SVC" 2>/dev/null || true
+sudo systemctl stop "$ITG_SVC" 2>/dev/null || true
+
+wait_until_gone "$ITG_IFACE interface" 10 ip link show "$ITG_IFACE"
+
+if ip route show 2>/dev/null | grep -qE "10\.99\.(0|1)\.0/24 dev $ITG_IFACE"; then
+  die "Split-tunnel routes for $ITG_IFACE still present after stop"
+fi
+
+echo "PASS: split-tunnel routes removed after SIGKILL + stop"
 
 # ─── Done ───────────────────────────────────────────────────────────────────
 
