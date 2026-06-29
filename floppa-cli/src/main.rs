@@ -692,6 +692,9 @@ async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> R
         dns::set_dns(&wg_config)?;
     }
 
+    eprintln!("Waiting for WireGuard handshake...");
+    tunnel::verify_handshake(&device, 10).await?;
+
     println!("READY");
     eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
     wait_for_shutdown().await?;
@@ -725,6 +728,16 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
                 dns::write_dns(&servers)?;
             }
         }
+    }
+
+    eprintln!("Checking VLESS connectivity...");
+    if let Err(e) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect("1.1.1.1:80"),
+    )
+    .await
+    {
+        eprintln!("Warning: connectivity check failed ({e}) — tunnel may still work");
     }
 
     println!("READY");

@@ -1,7 +1,8 @@
 use crate::net::{NetworkState, get_default_gateway, route_exists, run_ip};
+use crate::paths;
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
+use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer, uapi::UapiServer};
 use gotatun::tun::tun_async_device::TunDevice;
 use gotatun::udp::socket::UdpSocketFactory;
 use gotatun::x25519;
@@ -372,11 +373,91 @@ pub fn status(interface: &str) -> Result<()> {
         bail!("Floppa {interface}: interface exists, but VPN routes are missing");
     }
     println!("Floppa {interface}: connected");
+    wg_stats(interface);
     Ok(())
+}
+
+/// Print WireGuard peer stats via the UAPI socket if available (best-effort).
+fn wg_stats(interface: &str) {
+    let sock = format!("/var/run/wireguard/{interface}.sock");
+    if !std::path::Path::new(&sock).exists() {
+        return;
+    }
+    let Ok(out) = paths::command("wg")
+        .args(["show", interface, "dump"])
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    // `wg show <iface> dump` format (tab-separated):
+    //   line 0: device info (private_key listen_port fwmark)
+    //   line 1+: peer  psk  endpoint  allowed_ips  last_handshake_epoch  rx_bytes  tx_bytes  keepalive
+    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 7 {
+            continue;
+        }
+        let endpoint = fields[2];
+        let handshake_epoch: u64 = fields[4].parse().unwrap_or(0);
+        let rx: u64 = fields[5].parse().unwrap_or(0);
+        let tx: u64 = fields[6].parse().unwrap_or(0);
+        let handshake_str = if handshake_epoch == 0 {
+            "none".to_string()
+        } else {
+            format!("{}s ago", handshake_epoch)
+        };
+        println!(
+            "  peer: {endpoint}  handshake: {handshake_str}  rx: {}  tx: {}",
+            human_bytes(rx),
+            human_bytes(tx)
+        );
+    }
+}
+
+fn human_bytes(b: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    if b >= GIB {
+        format!("{:.1} GiB", b as f64 / GIB as f64)
+    } else if b >= MIB {
+        format!("{:.1} MiB", b as f64 / MIB as f64)
+    } else if b >= KIB {
+        format!("{:.1} KiB", b as f64 / KIB as f64)
+    } else {
+        format!("{b} B")
+    }
 }
 
 pub fn interface_exists(interface: &str) -> bool {
     route_exists(&["link", "show", interface])
+}
+
+/// Poll gotatun peer stats until a WireGuard handshake is confirmed or `timeout` elapses.
+pub async fn verify_handshake(device: &FloppaDevice, timeout_secs: u64) -> Result<()> {
+    let deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        let handshook = device
+            .read(async |dr| {
+                let peers = dr.peers().await;
+                peers.iter().any(|p| p.stats.last_handshake.is_some())
+            })
+            .await;
+        if handshook {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "WireGuard handshake timed out after {timeout_secs}s — \
+                 check server connectivity and credentials"
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
 }
 
 pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaDevice> {
@@ -413,6 +494,10 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
         .with_ip(gota_tun)
         .with_private_key(x25519::StaticSecret::from(private_key))
         .with_peer(peer);
+
+    if let Ok(uapi) = UapiServer::default_unix_socket(interface, None, None) {
+        builder = builder.with_uapi(uapi);
+    }
 
     // AmneziaWG: apply interface-wide obfuscation. Absent → plain WireGuard.
     if let Some(obf) = &config.obfuscation {
