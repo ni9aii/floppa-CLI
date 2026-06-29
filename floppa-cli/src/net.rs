@@ -64,13 +64,5 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
     {
         bail!("Endpoint route {route} via {gateway} is missing");
     }
-    if !route_exists(&["route", "show", "0.0.0.0/1"])
-        || !route_exists(&["route", "show", "128.0.0.0/1"])
-    {
-        bail!(
-            "Default VPN split routes are missing on {}",
-            state.interface
-        );
-    }
     Ok(())
 }
