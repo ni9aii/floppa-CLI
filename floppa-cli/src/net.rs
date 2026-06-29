@@ -6,6 +6,7 @@ pub struct NetworkState {
     pub interface: String,
     pub endpoint_route: Option<String>,
     pub endpoint_gateway: Option<String>,
+    pub added_routes: Vec<String>,
 }
 
 pub fn run_ip(args: &[&str]) -> Result<()> {
@@ -48,7 +49,7 @@ pub fn cleanup_networking(state: &NetworkState) -> Result<()> {
     if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
         run_ip_quiet(&["route", "del", route, "via", gateway]);
     }
-    for route in ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"] {
+    for route in &state.added_routes {
         run_ip_quiet(&["route", "del", route, "dev", &state.interface]);
     }
     run_ip_quiet(&["link", "del", &state.interface]);
@@ -64,13 +65,10 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
     {
         bail!("Endpoint route {route} via {gateway} is missing");
     }
-    if !route_exists(&["route", "show", "0.0.0.0/1"])
-        || !route_exists(&["route", "show", "128.0.0.0/1"])
-    {
-        bail!(
-            "Default VPN split routes are missing on {}",
-            state.interface
-        );
+    for route in &state.added_routes {
+        if !route_exists(&["route", "show", route]) {
+            bail!("VPN route {route} is missing on {}", state.interface);
+        }
     }
     Ok(())
 }
