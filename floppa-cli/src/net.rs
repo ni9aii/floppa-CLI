@@ -9,26 +9,43 @@ pub struct NetworkState {
     pub added_routes: Vec<String>,
 }
 
+/// Build arguments for `ip` command, auto-adding `-6` for IPv6 routes.
+fn ip_args(args: Vec<String>) -> Vec<String> {
+    // Check if any arg is an IPv6 route (contains `::`)
+    let is_ipv6 = args.iter().any(|a| a.contains("::"));
+    if is_ipv6 {
+        vec!["-6".to_string()].into_iter().chain(args).collect()
+    } else {
+        args
+    }
+}
+
 pub fn run_ip(args: &[&str]) -> Result<()> {
-    let output = paths::command("ip").args(args).output()?;
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let full_args = ip_args(args);
+    let output = paths::command("ip").args(&full_args).output()?;
     if output.status.success() {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!("ip {} failed: {}", args.join(" "), stderr.trim()))
+        Err(anyhow!("ip {} failed: {}", full_args.join(" "), stderr.trim()))
     }
 }
 
 pub fn run_ip_quiet(args: &[&str]) -> bool {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let full_args = ip_args(args);
     paths::command("ip")
-        .args(args)
+        .args(&full_args)
         .output()
         .is_ok_and(|output| output.status.success())
 }
 
 pub fn route_exists(args: &[&str]) -> bool {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let full_args = ip_args(args);
     paths::command("ip")
-        .args(args)
+        .args(&full_args)
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
 }
@@ -47,10 +64,10 @@ pub fn get_default_gateway() -> Result<Option<String>> {
 
 pub fn cleanup_networking(state: &NetworkState) -> Result<()> {
     if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
-        run_ip_quiet(&["route", "del", route, "via", gateway]);
+        run_ip_quiet(&["route", "del", route.as_str(), "via", gateway.as_str()]);
     }
     for route in &state.added_routes {
-        run_ip_quiet(&["route", "del", route, "dev", &state.interface]);
+        run_ip_quiet(&["route", "del", route.as_str(), "dev", &state.interface]);
     }
     run_ip_quiet(&["link", "del", &state.interface]);
     Ok(())
@@ -60,13 +77,15 @@ pub fn verify_networking(state: &NetworkState) -> Result<()> {
     if !route_exists(&["link", "show", &state.interface]) {
         bail!("VPN interface {} is not up", state.interface);
     }
-    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway)
-        && !route_exists(&["route", "show", route])
-    {
-        bail!("Endpoint route {route} via {gateway} is missing");
+    if let (Some(route), Some(gateway)) = (&state.endpoint_route, &state.endpoint_gateway) {
+        let args: Vec<&str> = vec!["route", "show", route.as_str()];
+        if !route_exists(&args) {
+            bail!("Endpoint route {route} via {gateway} is missing");
+        }
     }
     for route in &state.added_routes {
-        if !route_exists(&["route", "show", route]) {
+        let args: Vec<&str> = vec!["route", "show", route.as_str()];
+        if !route_exists(&args) {
             bail!("VPN route {route} is missing on {}", state.interface);
         }
     }
