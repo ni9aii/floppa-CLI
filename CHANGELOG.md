@@ -5,6 +5,13 @@ All notable changes to the Floppa VPN CLI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-cli-alpha] - 2026-07-02
+
+### Fixed
+- IPv6 route detection in `route_exists()` - previously used `ip route` without `-6` flag,
+  causing VPN service to crash with "VPN route ::/1 is missing" error on systems with IPv6
+  connectivity. Now IPv6 routes are correctly handled with `ip -6 route`.
+
 ## [0.1.2-cli-alpha] - 2026-06-22
 
 ### Added

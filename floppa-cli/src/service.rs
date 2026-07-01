@@ -21,6 +21,8 @@ pub struct ServiceInstallOptions {
     pub protocol: String,
     pub interface: String,
     pub no_dns: bool,
+    pub skip_handshake_check: bool,
+    pub config: Option<PathBuf>,
     pub api_url: String,
     pub user: String,
     pub home: PathBuf,
@@ -193,12 +195,20 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
         PathBuf::from("--interface"),
         PathBuf::from(&opts.interface),
     ];
+    if let Some(ref cfg) = opts.config {
+        validate_absolute_path("config", cfg)?;
+        exec_args.push(PathBuf::from("--config"));
+        exec_args.push(cfg.clone());
+    }
     // System-scoped services run as non-root with only CAP_NET_ADMIN/CAP_NET_RAW —
     // writing /etc/resolv.conf requires DAC_OVERRIDE which is absent by design.
     // Force --no-dns for system scope to prevent a crash loop on every start.
     let no_dns = opts.no_dns || opts.scope == ServiceScope::System;
     if no_dns {
         exec_args.push(PathBuf::from("--no-dns"));
+    }
+    if opts.skip_handshake_check {
+        exec_args.push(PathBuf::from("--skip-handshake-check"));
     }
     if opts.api_url != DEFAULT_API_URL {
         exec_args.push(PathBuf::from("--api-url"));
@@ -221,6 +231,8 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
         "Description=Floppa VPN tunnel managed by floppa-cli".to_string(),
         "After=network-online.target".to_string(),
         "Wants=network-online.target".to_string(),
+        "StartLimitIntervalSec=300".to_string(),
+        "StartLimitBurst=10".to_string(),
         String::new(),
         "[Service]".to_string(),
         "Type=simple".to_string(),
@@ -234,6 +246,10 @@ pub fn render_unit(opts: &ServiceInstallOptions) -> Result<String> {
 
     lines.extend([
         exec_start,
+        format!(
+            "ExecStopPost=-/bin/sh -c 'ip link del {} 2>/dev/null || true'",
+            opts.interface
+        ),
         "Restart=on-failure".to_string(),
         "RestartSec=5s".to_string(),
         "SuccessExitStatus=0 130 143".to_string(),
@@ -395,6 +411,8 @@ mod tests {
             protocol: "amneziawg".to_string(),
             interface: "floppa0".to_string(),
             no_dns: true,
+            skip_handshake_check: false,
+            config: None,
             api_url: DEFAULT_API_URL.to_string(),
             user: "test-user".to_string(),
             home: PathBuf::from("/srv/floppa-test/home/test-user"),
@@ -420,6 +438,11 @@ mod tests {
             "ExecStart=/srv/floppa-test/bin/floppa-cli connect --protocol amneziawg --interface floppa0 --no-dns --log-file /srv/floppa-test/home/test-user/.local/state/floppa-cli/floppa-cli.log"
         );
         assert!(unit.contains("AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW"));
+        assert!(unit.contains("StartLimitIntervalSec=300"));
+        assert!(unit.contains("StartLimitBurst=10"));
+        assert!(
+            unit.contains("ExecStopPost=-/bin/sh -c 'ip link del floppa0 2>/dev/null || true'")
+        );
     }
 
     #[test]
@@ -512,6 +535,21 @@ mod tests {
     }
 
     #[test]
+    fn includes_skip_handshake_check_when_set() {
+        let mut opts = service_options(ServiceScope::User);
+        opts.skip_handshake_check = true;
+
+        let unit = render_unit(&opts).unwrap();
+        assert!(unit.contains("--skip-handshake-check"));
+    }
+
+    #[test]
+    fn omits_skip_handshake_check_by_default() {
+        let unit = render_unit(&service_options(ServiceScope::User)).unwrap();
+        assert!(!unit.contains("--skip-handshake-check"));
+    }
+
+    #[test]
     fn omits_api_url_when_default() {
         let unit = render_unit(&service_options(ServiceScope::System)).unwrap();
         assert!(!unit.contains("--api-url"));
@@ -582,5 +620,43 @@ mod tests {
     #[test]
     fn quote_systemd_arg_with_dollar() {
         assert_eq!(quote_systemd_arg("$HOME"), "'$HOME'");
+    }
+
+    #[test]
+    fn renders_config_arg_when_set() {
+        let mut opts = service_options(ServiceScope::System);
+        opts.config = Some(PathBuf::from("/etc/floppa-test/peer.conf"));
+
+        let unit = render_unit(&opts).unwrap();
+        let exec_start = unit
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .expect("ExecStart line");
+
+        assert!(
+            exec_start.contains("--config /etc/floppa-test/peer.conf"),
+            "ExecStart should contain --config: {exec_start}"
+        );
+    }
+
+    #[test]
+    fn renders_no_config_arg_when_absent() {
+        let unit = render_unit(&service_options(ServiceScope::System)).unwrap();
+        let exec_start = unit
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .expect("ExecStart line");
+
+        assert!(
+            !exec_start.contains("--config"),
+            "ExecStart should not contain --config: {exec_start}"
+        );
+    }
+
+    #[test]
+    fn rejects_relative_config_path() {
+        let mut opts = service_options(ServiceScope::System);
+        opts.config = Some(PathBuf::from("relative/peer.conf"));
+        assert!(render_unit(&opts).is_err());
     }
 }

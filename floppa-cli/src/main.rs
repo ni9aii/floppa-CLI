@@ -77,6 +77,9 @@ enum Command {
         /// Skip DNS configuration
         #[arg(long)]
         no_dns: bool,
+        /// Skip WireGuard handshake verification after connect (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
     },
@@ -160,6 +163,12 @@ enum ServiceCommand {
         /// Skip DNS configuration
         #[arg(long)]
         no_dns: bool,
+        /// Skip WireGuard handshake verification in the service (useful for testing)
+        #[arg(long)]
+        skip_handshake_check: bool,
+        /// Static WireGuard/AmneziaWG .conf file; if set, skips API fetch at startup
+        #[arg(long)]
+        config: Option<String>,
         /// API URL passed to `connect`
         #[arg(long, env = "FLOPPA_API_URL", default_value = DEFAULT_API_URL)]
         api_url: String,
@@ -170,8 +179,8 @@ enum ServiceCommand {
         #[arg(long, env = "HOME")]
         home: Option<PathBuf>,
         /// Absolute path to the service log file
-        #[arg(long)]
-        log_file: Option<PathBuf>,
+        #[arg(long = "service-log-file")]
+        svc_log_file: Option<PathBuf>,
     },
     /// Remove an installed systemd unit
     Uninstall,
@@ -226,6 +235,67 @@ enum DeviceCommand {
 
 fn is_vless(config_str: &str) -> bool {
     config_str.trim().starts_with("vless://")
+}
+
+fn is_network_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|re| re.is_connect() || re.is_timeout())
+    })
+}
+
+/// Try `op` once immediately; on retryable error sleep `delays_secs[i]` and retry.
+/// Total attempts = delays_secs.len() + 1. Non-retryable errors fail immediately.
+async fn retry_with_backoff<T, F, Fut>(
+    delays_secs: &[u64],
+    is_retryable: impl Fn(&anyhow::Error) -> bool,
+    mut op: F,
+) -> Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    for (attempt, &delay) in delays_secs.iter().enumerate() {
+        match op().await {
+            Ok(v) => return Ok(v),
+            Err(e) if is_retryable(&e) => {
+                eprintln!(
+                    "Network error (attempt {}/{}): {e:#}",
+                    attempt + 1,
+                    delays_secs.len() + 1
+                );
+                eprintln!("Retrying in {delay}s...");
+                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    op().await
+}
+
+async fn fetch_config_from_api(api_url: &str, protocol: &str) -> Result<String> {
+    const DELAYS: &[u64] = &[10, 20, 40, 60, 60];
+
+    let token = auth::load_token()?.context("Not logged in. Run `floppa-cli login` first.")?;
+    let client = api::ApiClient::new(api_url, &token);
+
+    retry_with_backoff(DELAYS, is_network_error, || async {
+        let me = client.get_me().await.context("Failed to reach API")?;
+        if let Some(ref sub) = me.subscription {
+            eprintln!(
+                "Plan: {} (speed limit: {})",
+                sub.plan_name,
+                sub.speed_limit_mbps
+                    .map(|s| format!("{s} Mbps"))
+                    .unwrap_or_else(|| "unlimited".into())
+            );
+        } else {
+            bail!("No active subscription");
+        }
+        client.find_or_create_peer(protocol).await
+    })
+    .await
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
@@ -301,31 +371,20 @@ async fn main() -> Result<()> {
             protocol,
             interface,
             no_dns,
+            skip_handshake_check,
             api_url,
         } => {
             let config_str = match config {
                 Some(path) => std::fs::read_to_string(&path)
                     .with_context(|| format!("Failed to read config file: {path}"))?,
                 None => {
-                    let token = auth::load_token()?
-                        .context("Not logged in. Run `floppa-cli login` first.")?;
-                    let client = api::ApiClient::new(&api_url, &token);
-                    let me = client.get_me().await?;
-                    if let Some(ref sub) = me.subscription {
-                        eprintln!(
-                            "Plan: {} (speed limit: {})",
-                            sub.plan_name,
-                            sub.speed_limit_mbps
-                                .map(|s| format!("{s} Mbps"))
-                                .unwrap_or_else(|| "unlimited".into())
-                        );
-                    } else {
-                        bail!("No active subscription");
-                    }
                     if protocol == Protocol::Vless {
+                        let token = auth::load_token()?
+                            .context("Not logged in. Run `floppa-cli login` first.")?;
+                        let client = api::ApiClient::new(&api_url, &token);
                         client.get_vless_config().await?
                     } else {
-                        client.find_or_create_peer(protocol.as_str()).await?
+                        fetch_config_from_api(&api_url, protocol.as_str()).await?
                     }
                 }
             };
@@ -333,7 +392,7 @@ async fn main() -> Result<()> {
             if is_vless(&config_str) {
                 connect_vless(&config_str, &interface, no_dns).await?;
             } else {
-                connect_wireguard(&config_str, &interface, no_dns).await?;
+                connect_wireguard(&config_str, &interface, no_dns, skip_handshake_check).await?;
             }
         }
         Command::Peers { api_url } => {
@@ -496,16 +555,18 @@ fn handle_service_command(
             protocol,
             interface,
             no_dns,
+            skip_handshake_check,
+            config,
             api_url,
             user,
             home,
-            log_file,
+            svc_log_file,
         } => {
             let home = home.unwrap_or_else(default_home);
             let user = user
                 .or_else(|| std::env::var("USER").ok())
                 .unwrap_or_default();
-            let log_file = log_file.unwrap_or_else(|| {
+            let log_file = svc_log_file.unwrap_or_else(|| {
                 home.join(".local")
                     .join("state")
                     .join("floppa-cli")
@@ -521,6 +582,8 @@ fn handle_service_command(
                 protocol: protocol.as_str().to_string(),
                 interface,
                 no_dns,
+                skip_handshake_check,
+                config: config.map(PathBuf::from),
                 api_url,
                 user,
                 home,
@@ -625,7 +688,12 @@ impl Drop for CleanupKind {
     }
 }
 
-async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> Result<()> {
+async fn connect_wireguard(
+    config_str: &str,
+    interface: &str,
+    no_dns: bool,
+    skip_handshake_check: bool,
+) -> Result<()> {
     let wg_config = tunnel::WgConfig::from_config_str(config_str)?;
     eprintln!("Creating WireGuard tunnel on {interface}...");
     let device = tunnel::create_tunnel(&wg_config, interface).await?;
@@ -636,6 +704,11 @@ async fn connect_wireguard(config_str: &str, interface: &str, no_dns: bool) -> R
     let mut cleanup = CleanupKind::wireguard(network_state, !no_dns);
     if !no_dns {
         dns::set_dns(&wg_config)?;
+    }
+
+    eprintln!("Waiting for WireGuard handshake...");
+    if !skip_handshake_check {
+        tunnel::verify_handshake(&device, 10).await?;
     }
 
     println!("READY");
@@ -673,6 +746,16 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
         }
     }
 
+    eprintln!("Checking VLESS connectivity...");
+    if let Err(e) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect("1.1.1.1:80"),
+    )
+    .await
+    {
+        eprintln!("Warning: connectivity check failed ({e}) — tunnel may still work");
+    }
+
     println!("READY");
     eprintln!("Connected! Press Ctrl+C or send SIGTERM to disconnect.");
     wait_for_shutdown().await?;
@@ -700,4 +783,107 @@ async fn wait_for_shutdown() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn is_network_error_true_for_connection_refused() {
+        let client = reqwest::Client::new();
+        let err = client.get("http://127.0.0.1:1/").send().await.unwrap_err();
+        assert!(is_network_error(&anyhow::Error::from(err)));
+    }
+
+    #[tokio::test]
+    async fn is_network_error_false_for_plain_anyhow() {
+        let err = anyhow::anyhow!("some application error");
+        assert!(!is_network_error(&err));
+    }
+
+    #[tokio::test]
+    async fn retry_succeeds_on_first_attempt() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Ok::<i32, anyhow::Error>(42)
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_succeeds_on_nth_attempt() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    let n = c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n < 2 {
+                        Err::<i32, _>(anyhow::anyhow!("transient"))
+                    } else {
+                        Ok(99)
+                    }
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap(), 99);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn retry_gives_up_after_all_delays_exhausted() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| true,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("always fails"))
+                }
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        // delays.len() + 1 = 3 + 1 = 4 total attempts
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn retry_stops_immediately_on_non_retryable_error() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let calls2 = calls.clone();
+        let result = retry_with_backoff(
+            &[0u64, 0, 0],
+            |_| false,
+            || {
+                let c = calls2.clone();
+                async move {
+                    c.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err::<i32, _>(anyhow::anyhow!("auth error"))
+                }
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
 }
