@@ -97,10 +97,13 @@ pub async fn login_telegram(api_url: &str) -> Result<()> {
     let port = listener.local_addr()?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
+    // Generate CSRF state nonce to prevent authorization code injection attacks
+    let state = urlencoding(&random_state());
     let auth_url = format!(
-        "{}/auth/telegram/start?redirect_uri={}",
+        "{}/auth/telegram/start?redirect_uri={}&state={}",
         api_url.trim_end_matches('/'),
-        urlencoding(&redirect_uri)
+        urlencoding(&redirect_uri),
+        state
     );
 
     eprintln!("Opening browser for Telegram login...");
@@ -110,8 +113,8 @@ pub async fn login_telegram(api_url: &str) -> Result<()> {
         eprintln!("Failed to open browser automatically.");
     }
 
-    // Wait for the callback
-    let code = wait_for_callback(listener).await?;
+    // Wait for the callback (with state verification)
+    let code = wait_for_callback(listener, port, &state).await?;
 
     // Exchange code for JWT
     let auth = ApiClient::exchange_code(api_url, &code).await?;
@@ -198,8 +201,12 @@ fn prompt_line(prompt: &str) -> Result<String> {
     Ok(line.trim_end_matches(['\r', '\n']).to_string())
 }
 
-/// Wait for a single HTTP GET request on the callback listener, extract `code` param.
-async fn wait_for_callback(listener: TcpListener) -> Result<String> {
+/// Wait for a single HTTP GET request on the callback listener, extract `code` param and verify `state`.
+async fn wait_for_callback(
+    listener: TcpListener,
+    port: u16,
+    expected_state: &str,
+) -> Result<String> {
     let (mut stream, _) =
         tokio::time::timeout(std::time::Duration::from_secs(120), listener.accept())
             .await
@@ -229,23 +236,47 @@ async fn wait_for_callback(listener: TcpListener) -> Result<String> {
 
     let request = String::from_utf8_lossy(&buf);
 
-    // Parse GET /callback?code=XYZ HTTP/1.1
+    // Validate Host header to prevent DNS rebinding attacks
+    let expected_host = format!("127.0.0.1:{port}");
+    let host_valid = request.lines().any(|line| {
+        let (k, v) = match line.split_once(':') {
+            Some(pair) => pair,
+            None => return false,
+        };
+        k.eq_ignore_ascii_case("Host") && v.trim() == expected_host
+    });
+
+    if !host_valid {
+        // Reject request with wrong Host header
+        let _ = stream
+            .write_all(
+                b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nHost mismatch\r\n",
+            )
+            .await;
+        bail!("Host header mismatch - possible CSRF attack");
+    }
+
+    // Parse GET /callback?code=XYZ&state=ABC HTTP/1.1
     let code = request
         .lines()
         .next()
         .and_then(|line| {
             let path = line.split_whitespace().nth(1)?;
             let query = path.split('?').nth(1)?;
-            query.split('&').find_map(|param| {
+            let mut found_code = None;
+            let mut state_valid = false;
+            for param in query.split('&') {
                 let (k, v) = param.split_once('=')?;
                 if k == "code" {
-                    Some(v.to_string())
-                } else {
-                    None
+                    found_code = Some(v.to_string());
+                } else if k == "state" && v == expected_state {
+                    state_valid = true;
                 }
-            })
+            }
+            // Only return code if state matches (CSRF protection)
+            state_valid.then_some(found_code).flatten()
         })
-        .ok_or_else(|| anyhow!("No 'code' parameter in callback"))?;
+        .ok_or_else(|| anyhow!("No valid 'code' parameter or missing/invalid 'state'"))?;
 
     // Respond with success page
     let body = r#"<!DOCTYPE html>
@@ -266,6 +297,15 @@ async fn wait_for_callback(listener: TcpListener) -> Result<String> {
     stream.flush().await?;
 
     Ok(code)
+}
+
+/// Generate a random CSRF state nonce for OAuth flow.
+fn random_state() -> String {
+    // Use 16 random bytes (32 hex chars) - sufficient for CSRF protection
+    rand::random::<[u8; 16]>()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn urlencoding(s: &str) -> String {

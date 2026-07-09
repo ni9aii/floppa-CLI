@@ -28,7 +28,11 @@ pub fn run_ip(args: &[&str]) -> Result<()> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow!("ip {} failed: {}", full_args.join(" "), stderr.trim()))
+        Err(anyhow!(
+            "ip {} failed: {}",
+            full_args.join(" "),
+            stderr.trim()
+        ))
     }
 }
 

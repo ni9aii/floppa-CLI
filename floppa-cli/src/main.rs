@@ -703,7 +703,7 @@ async fn connect_wireguard(
 
     let mut cleanup = CleanupKind::wireguard(network_state, !no_dns);
     if !no_dns {
-        dns::set_dns(&wg_config)?;
+        dns::set_dns(&wg_config, interface)?;
     }
 
     eprintln!("Waiting for WireGuard handshake...");
@@ -741,7 +741,7 @@ async fn connect_vless(config_str: &str, interface: &str, no_dns: bool) -> Resul
         if let Some(ref dns) = config.dns {
             let servers: Vec<String> = dns.split(',').map(|s| s.trim().to_string()).collect();
             if !servers.is_empty() {
-                dns::write_dns(&servers)?;
+                dns::write_dns(&servers, interface)?;
             }
         }
     }
