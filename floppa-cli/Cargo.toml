@@ -1,6 +1,6 @@
 [package]
 name = "floppa-cli"
-version = "0.2.0-cli-alpha"
+version = "0.3.0"
 edition = "2024"
 description = "CLI client for Floppa VPN"
 
@@ -26,8 +26,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-log = "0.2.0"
 tracing-appender = "0.2.4"
-rand.workspace = true
-rpassword = "7"
-libc = "0.2"
+# D-Bus (systemd-logind) for instant reconnect on system resume from sleep.
+zbus = "5"
+# Stream trait for the logind signal stream (zbus re-exports but doesn't expose
+# the path publicly; pull the crate directly for OrderedStreamExt).
+ordered-stream = "0.2"
 # Uncomment for local development, comment out before commit/push:
 # shoes-lite = { path = "../../rust/shoes-lite" }

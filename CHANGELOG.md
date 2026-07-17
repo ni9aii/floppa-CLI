@@ -1,56 +1,54 @@
 # Changelog
 
-All notable changes to the Floppa VPN CLI will be documented in this file.
+All notable changes to the `floppa-cli` crate are documented here. The format
+is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+for the CLI crate.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.3.0-cli] - 2026-07-18
 
-## [0.2.1-cli-alpha] - 2026-07-02
-
-### Fixed
-- IPv6 route detection in `route_exists()` - previously used `ip route` without `-6` flag,
-  causing VPN service to crash with "VPN route ::/1 is missing" error on systems with IPv6
-  connectivity. Now IPv6 routes are correctly handled with `ip -6 route`.
-
-## [0.1.2-cli-alpha] - 2026-06-22
+First stable release of the CLI-only connector (no `-cli-alpha` suffix).
 
 ### Added
-- Systemd service management support including:
-  - `floppa-cli service install` for systemd unit creation
-  - `floppa-cli service status` without sudo password requirement
-  - `floppa-cli service uninstall` for graceful removal
-  - Enhanced sudo user handling and user context for service commands
-  - Support for both system and user scope services
-- Account login method selection alongside Telegram authentication
-- Improved service command collision resolution
-
-### Fixed
-- Resolved `login-account` command collision with global `--log-file` argument
-- Fixed sudo password prompts for service status checks
-- Improved user handling when `USER=root` environment variable is set
-- Enhanced log file path handling and permissions
-- Enhanced peer management lifecycle commands
-- Improved device identity management
-
-## [0.1.1-cli-alpha] - 2026-06-21
+- **`floppa-cli service`** (fork-only): install/uninstall the connector as a
+  systemd unit. `service install` renders `/etc/systemd/system/floppa-cli.service`
+  pointing at the current binary + chosen connect args, then `daemon-reload` +
+  `enable --now` (use `--no-start` to enable without starting). `service uninstall`
+  disables, stops and removes it; `service print` dumps the unit to stdout.
+  Requires root for install/uninstall.
+- **Auto-reconnect** (`reconnect.rs`):
+  - Background watchdog that health-checks the tunnel every 30 s
+    (WireGuard handshake age / VLESS TCP reachability) and rebuilds it on
+    drop.
+  - **Instant wake on system resume**: subscribes to systemd-logind
+    `PrepareForSleep` over D-Bus (Linux) so the tunnel is rebuilt the moment
+    the machine wakes from sleep — no waiting for the next watchdog tick.
+  - Exponential backoff (2 s → 60 s cap) with retryable vs. fatal error
+    classification; fatal errors surface so systemd `Restart=on-failure` kicks
+    in.
+  - `docs/RECONNECT.md` describing the mechanism and tuning knobs.
+- `systemd/floppa-cli.service` — example unit with `Restart=on-failure` so a
+  fatal CLI exit is recovered by systemd (the in-process reconnect loop covers
+  transient drops on its own).
+- Unit tests for the reconnect loop (`run`): initial connect, rebuild-on-
+  unhealthy, plus the existing backoff / signal / config coverage.
+- `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md` for repo hygiene.
 
 ### Changed
-- Migration from wrapper-based execution to direct `floppa-cli` binary usage
-- Enhanced systemd integration with improved user context handling
-- Refined release workflow including checksum generation fixes
-- Added comprehensive systemd service management capabilities
+- `connect_wireguard` / `connect_vless` now drive the reconnect loop instead
+  of blocking on a one-shot `wait_for_shutdown`. Shutdown (Ctrl+C / SIGTERM)
+  still tears the tunnel down cleanly.
 
-## [0.1.0-cli-alpha] - 2026-06-18
+### Fixed
+- Committed `Cargo.lock` so the `rpassword` dependency addition is
+  reproducible.
 
-### Added
-- Primary release with basic CLI functionality
-- WireGuard/AmneziaWG tunnel support
-- VLESS protocol support
-- API client integration
-- Authentication and device management
-
-## [0.0.1-internal]
+## [0.2.0-cli-alpha] - 2026-07-10
 
 ### Added
-- Initial internal development version
-- Core CLI structure and command framework
+- `rpassword`-based password prompt (with `FLOPPA_PASSWORD` env fallback) for
+  token retrieval.
+- `just` task runner targets (`build`, `lint`, `test`, `run`).
+
+### Changed
+- CLI split into the `floppa-cli` crate inside the `floppa-CLI` workspace.

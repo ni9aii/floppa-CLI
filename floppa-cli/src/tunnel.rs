@@ -1,13 +1,12 @@
-use crate::net::{NetworkState, get_default_gateway, route_exists, run_ip};
-use crate::paths;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer, uapi::UapiServer};
+use gotatun::device::{Device, DeviceBuilder, Peer as DevicePeer};
 use gotatun::tun::tun_async_device::TunDevice;
 use gotatun::udp::socket::UdpSocketFactory;
 use gotatun::x25519;
 use ipnetwork::IpNetwork;
 use std::net::SocketAddr;
+use std::process::Command;
 use std::str::FromStr;
 
 pub const DEFAULT_INTERFACE_NAME: &str = "floppa0";
@@ -94,45 +93,31 @@ impl WgConfig {
                         "mtu" => mtu = value.parse().ok(),
                         // AmneziaWG obfuscation params
                         "jc" => {
-                            obf.jc = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param jc: {value}"))?;
+                            obf.jc = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "jmin" => {
-                            obf.jmin = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param jmin: {value}"))?;
+                            obf.jmin = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "jmax" => {
-                            obf.jmax = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param jmax: {value}"))?;
+                            obf.jmax = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "s1" => {
-                            obf.s1 = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param s1: {value}"))?;
+                            obf.s1 = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "s2" => {
-                            obf.s2 = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param s2: {value}"))?;
+                            obf.s2 = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "s3" => {
-                            obf.s3 = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param s3: {value}"))?;
+                            obf.s3 = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "s4" => {
-                            obf.s4 = value
-                                .parse()
-                                .with_context(|| format!("Invalid AWG param s4: {value}"))?;
+                            obf.s4 = value.parse().unwrap_or(0);
                             has_awg = true;
                         }
                         "h1" => {
@@ -312,51 +297,55 @@ fn build_gotatun_awg(obf: &AwgObfuscation) -> Result<gotatun::noise::awg::AwgCon
     Ok(a)
 }
 
-pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<NetworkState> {
+fn run_ip(args: &[&str]) -> Result<()> {
+    let output = Command::new("ip").args(args).output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow!("ip {} failed: {}", args.join(" "), stderr.trim()))
+    }
+}
+
+fn get_default_gateway() -> Result<Option<String>> {
+    let output = Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()?;
+    let route_output = String::from_utf8_lossy(&output.stdout);
+    Ok(route_output
+        .split_whitespace()
+        .skip_while(|&w| w != "via")
+        .nth(1)
+        .map(|s| s.to_string()))
+}
+
+pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<()> {
     let addr = config.address_network()?;
 
     run_ip(&["addr", "add", &addr.to_string(), "dev", interface])?;
     run_ip(&["link", "set", interface, "mtu", &config.mtu().to_string()])?;
     run_ip(&["link", "set", interface, "up"])?;
 
-    // Add host route for WG endpoint via default gateway to prevent routing loop.
-    // Use `replace` so repeated starts after a crash are idempotent.
+    // Add host route for WG endpoint via default gateway to prevent routing loop
     let endpoint = config.peer_socket_addr().await?;
-    let endpoint_route = get_default_gateway()?
-        .map(|gateway| {
-            let ip = endpoint.ip();
-            let prefix = if ip.is_ipv4() { 32 } else { 128 };
-            let route = format!("{ip}/{prefix}");
-            run_ip(&["route", "replace", &route, "via", &gateway])?;
-            eprintln!("Endpoint route: {route} via {gateway}");
-            Ok::<_, anyhow::Error>((route, gateway))
-        })
-        .transpose()?;
+    if let Some(gateway) = get_default_gateway()? {
+        let endpoint_route = format!("{}/32", endpoint.ip());
+        run_ip(&["route", "add", &endpoint_route, "via", &gateway])?;
+        eprintln!("Endpoint route: {} via {}", endpoint_route, gateway);
+    }
 
-    // Add routes for allowed IPs. Use `replace` for idempotent restarts.
-    let mut added_routes = Vec::new();
+    // Add routes for allowed IPs
     for network in config.allowed_ips_networks() {
         if network.prefix() == 0 {
             if network.is_ipv4() {
-                run_ip(&["route", "replace", "0.0.0.0/1", "dev", interface])?;
-                run_ip(&["route", "replace", "128.0.0.0/1", "dev", interface])?;
-                added_routes.push("0.0.0.0/1".to_string());
-                added_routes.push("128.0.0.0/1".to_string());
+                run_ip(&["route", "add", "0.0.0.0/1", "dev", interface])?;
+                run_ip(&["route", "add", "128.0.0.0/1", "dev", interface])?;
             } else {
-                if let Err(e) = run_ip(&["route", "replace", "::/1", "dev", interface]) {
-                    eprintln!("Skipping IPv6 VPN route ::/1: {e}");
-                } else {
-                    added_routes.push("::/1".to_string());
-                }
-                if let Err(e) = run_ip(&["route", "replace", "8000::/1", "dev", interface]) {
-                    eprintln!("Skipping IPv6 VPN route 8000::/1: {e}");
-                } else {
-                    added_routes.push("8000::/1".to_string());
-                }
+                let _ = run_ip(&["route", "add", "::/1", "dev", interface]);
+                let _ = run_ip(&["route", "add", "8000::/1", "dev", interface]);
             }
         } else {
-            run_ip(&["route", "replace", &network.to_string(), "dev", interface])?;
-            added_routes.push(network.to_string());
+            run_ip(&["route", "add", &network.to_string(), "dev", interface])?;
         }
     }
 
@@ -364,117 +353,7 @@ pub async fn configure_networking(config: &WgConfig, interface: &str) -> Result<
     eprintln!("VPN IP: {ip}");
     eprintln!("Endpoint: {}", config.peer_endpoint);
 
-    Ok(NetworkState {
-        interface: interface.to_string(),
-        endpoint_route: endpoint_route.as_ref().map(|(route, _)| route.clone()),
-        endpoint_gateway: endpoint_route.as_ref().map(|(_, gateway)| gateway.clone()),
-        added_routes,
-    })
-}
-
-pub fn status(interface: &str) -> Result<()> {
-    if !interface_exists(interface) {
-        bail!("Floppa {interface}: not connected");
-    }
-    if !route_exists(&["route", "show", "0.0.0.0/1"])
-        || !route_exists(&["route", "show", "128.0.0.0/1"])
-    {
-        bail!("Floppa {interface}: interface exists, but VPN routes are missing");
-    }
-    println!("Floppa {interface}: connected");
-    wg_stats(interface);
     Ok(())
-}
-
-/// Print WireGuard peer stats via the UAPI socket if available (best-effort).
-fn wg_stats(interface: &str) {
-    let sock = format!("/var/run/wireguard/{interface}.sock");
-    if !std::path::Path::new(&sock).exists() {
-        return;
-    }
-    let Ok(out) = paths::command("wg")
-        .args(["show", interface, "dump"])
-        .output()
-    else {
-        return;
-    };
-    if !out.status.success() {
-        return;
-    }
-    // `wg show <iface> dump` format (tab-separated):
-    //   line 0: device info (private_key listen_port fwmark)
-    //   line 1+: peer  psk  endpoint  allowed_ips  last_handshake_epoch  rx_bytes  tx_bytes  keepalive
-    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
-        let Some((endpoint, handshake_epoch, rx, tx)) = parse_wg_dump_peer(line) else {
-            continue;
-        };
-        let handshake_str = if handshake_epoch == 0 {
-            "none".to_string()
-        } else {
-            format!("{}s ago", handshake_epoch)
-        };
-        println!(
-            "  peer: {endpoint}  handshake: {handshake_str}  rx: {}  tx: {}",
-            human_bytes(rx),
-            human_bytes(tx)
-        );
-    }
-}
-
-/// Parse one peer line from `wg show <iface> dump` output.
-/// Returns `(endpoint, last_handshake_epoch, rx_bytes, tx_bytes)` or `None` on malformed input.
-fn parse_wg_dump_peer(line: &str) -> Option<(String, u64, u64, u64)> {
-    let fields: Vec<&str> = line.split('\t').collect();
-    if fields.len() < 7 {
-        return None;
-    }
-    let endpoint = fields[2].to_string();
-    let handshake_epoch: u64 = fields[4].parse().unwrap_or(0);
-    let rx: u64 = fields[5].parse().unwrap_or(0);
-    let tx: u64 = fields[6].parse().unwrap_or(0);
-    Some((endpoint, handshake_epoch, rx, tx))
-}
-
-fn human_bytes(b: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = 1024 * KIB;
-    const GIB: u64 = 1024 * MIB;
-    if b >= GIB {
-        format!("{:.1} GiB", b as f64 / GIB as f64)
-    } else if b >= MIB {
-        format!("{:.1} MiB", b as f64 / MIB as f64)
-    } else if b >= KIB {
-        format!("{:.1} KiB", b as f64 / KIB as f64)
-    } else {
-        format!("{b} B")
-    }
-}
-
-pub fn interface_exists(interface: &str) -> bool {
-    route_exists(&["link", "show", interface])
-}
-
-/// Poll gotatun peer stats until a WireGuard handshake is confirmed or `timeout` elapses.
-pub async fn verify_handshake(device: &FloppaDevice, timeout_secs: u64) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
-    loop {
-        let handshook = device
-            .read(async |dr| {
-                let peers = dr.peers().await;
-                peers.iter().any(|p| p.stats.last_handshake.is_some())
-            })
-            .await;
-        if handshook {
-            return Ok(());
-        }
-        if tokio::time::Instant::now() >= deadline {
-            bail!(
-                "WireGuard handshake timed out after {timeout_secs}s — \
-                 check server connectivity and credentials"
-            );
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    }
 }
 
 pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaDevice> {
@@ -483,12 +362,6 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let preshared_key = config.peer_preshared_key_bytes()?;
     let endpoint = config.peer_socket_addr().await?;
     let allowed_ips = config.allowed_ips_networks();
-
-    // Remove a stale interface left by a previous session (e.g. after a crash).
-    if interface_exists(interface) {
-        eprintln!("Removing stale {interface} interface from previous session...");
-        run_ip(&["link", "del", interface])?;
-    }
 
     let mut tun_config = tun::Configuration::default();
     tun_config.tun_name(interface).mtu(config.mtu());
@@ -512,10 +385,6 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
         .with_private_key(x25519::StaticSecret::from(private_key))
         .with_peer(peer);
 
-    if let Ok(uapi) = UapiServer::default_unix_socket(interface, None, None) {
-        builder = builder.with_uapi(uapi);
-    }
-
     // AmneziaWG: apply interface-wide obfuscation. Absent → plain WireGuard.
     if let Some(obf) = &config.obfuscation {
         builder = builder.with_awg(build_gotatun_awg(obf)?);
@@ -524,42 +393,4 @@ pub async fn create_tunnel(config: &WgConfig, interface: &str) -> Result<FloppaD
     let device = builder.build().await?;
 
     Ok(device)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn human_bytes_boundaries() {
-        assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(1023), "1023 B");
-        assert_eq!(human_bytes(1024), "1.0 KiB");
-        assert_eq!(human_bytes(1024 * 1024), "1.0 MiB");
-        assert_eq!(human_bytes(1024 * 1024 * 1024), "1.0 GiB");
-    }
-
-    #[test]
-    fn parse_wg_dump_peer_valid_line() {
-        // Format: pubkey \t psk \t endpoint \t allowed_ips \t handshake_epoch \t rx \t tx \t keepalive
-        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t1700000000\t1048576\t2097152\t25";
-        let (endpoint, handshake_epoch, rx, tx) = parse_wg_dump_peer(line).unwrap();
-        assert_eq!(endpoint, "1.2.3.4:51820");
-        assert_eq!(handshake_epoch, 1700000000);
-        assert_eq!(rx, 1048576);
-        assert_eq!(tx, 2097152);
-    }
-
-    #[test]
-    fn parse_wg_dump_peer_no_handshake() {
-        let line = "AAAA\t(none)\t1.2.3.4:51820\t0.0.0.0/0\t0\t0\t0\t25";
-        let (_, handshake_epoch, _, _) = parse_wg_dump_peer(line).unwrap();
-        assert_eq!(handshake_epoch, 0);
-    }
-
-    #[test]
-    fn parse_wg_dump_peer_short_line_returns_none() {
-        assert!(parse_wg_dump_peer("only\ttwo\tfields").is_none());
-        assert!(parse_wg_dump_peer("").is_none());
-    }
 }
