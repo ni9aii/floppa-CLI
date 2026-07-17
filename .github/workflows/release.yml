@@ -60,7 +60,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: floppa-cli-linux-${{ matrix.label }}
           path: floppa-cli/target/${{ matrix.target }}/release/floppa-cli
@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
