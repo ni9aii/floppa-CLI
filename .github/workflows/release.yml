@@ -73,11 +73,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download artifacts
+      - name: Download x86_64 artifact
         uses: actions/download-artifact@v4
         with:
+          name: floppa-cli-linux-x86_64
           path: release-artifacts
-          merge-multiple: true
+
+      - name: Download aarch64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: floppa-cli-linux-aarch64
+          path: release-artifacts
 
       - name: List artifacts
         run: find release-artifacts -type f | sort
