@@ -2,164 +2,245 @@
   <img src="branding/hack_floppy_banana1.png" width="200" alt="Floppa VPN" />
 </p>
 
-<h1 align="center">floppa-cli</h1>
+<h1 align="center">Floppa VPN</h1>
 
-<p align="center">
-CLI-клиент для Floppa VPN — подключение к WireGuard / AmneziaWG / VLESS
-туннелям с консоли, без GUI.
-</p>
+<p align="center">VPN service built with Rust — daemon, Telegram bot, admin panel, and Tauri 2 client app.</p>
 
----
+[![CI](https://github.com/okhsunrog/floppa-vpn/actions/workflows/ci.yml/badge.svg)](https://github.com/okhsunrog/floppa-vpn/actions/workflows/ci.yml)
 
-## Что это
+## Architecture
 
-`floppa-cli` — **CLI-only форк** [okhsunrog/floppa-vpn](https://github.com/okhsunrog/floppa-vpn).
-В отличие от оригинала, здесь нет daemon/Telegram-бота/admin-панели/Tauri-клиента —
-только консольный клиент, который подключается к **уже работающему** серверу
-Floppa VPN по его HTTP API.
+Three tunnel protocols, two VPS regions:
 
-Клиент сам по себе **не поднимает сервер** и не разворачивает бэкенд. Ему нужен
-доступный инстанс floppa-vpn (свой или публичный `https://floppa.okhsunrog.dev`)
-и аккаунт на нём.
+- **AmneziaWG** — the default protocol. WireGuard plus DPI-resistant obfuscation; client connects to Moscow VPS (:51821), traffic routes to Europe VPS via a site-to-site WireGuard tunnel (policy routing + MASQUERADE)
+- **WireGuard** — plain WireGuard; client connects to Moscow VPS (:51820), same site-to-site routing to Europe
+- **VLESS+REALITY** — client connects to Moscow HAProxy (:443), which forwards non-web TLS to the local REALITY proxy; proxied traffic exits through Europe
 
-- Протоколы: WireGuard, AmneziaWG (DPI-стойкий WireGuard), VLESS+REALITY
-- Авто-восстановление туннеля после сна/Wi-Fi-роуминга/обрыва (см. [docs/RECONNECT.md](docs/RECONNECT.md))
-- Проверка «живости» туннеля:
-  - WireGuard/AmneziaWG — чтение свежести handshake через kernel UAPI
-    (пересборка, если handshake устарел)
-  - VLESS+REALITY — TCP-connect проба до эндпоинта
-- Поддержка IPv6-маршрутов (флаг `-6` добавляется автоматически)
-- Полная очистка сети при отключении (отслеживание добавленных маршрутов
-  и их удаление, включая stale-интерфейс `floppa0`)
-- systemd-юнит для запуска коннектора как сервиса (`floppa-cli service install`)
-- Только Linux (WireGuard управляется через netlink)
+```mermaid
+graph TD
+    Client["<b>Client Apps</b><br/>Tauri 2 — Linux, Windows, Android"]
 
-## История форка
+    Client -- "AmneziaWG :51821" --> Daemon
+    Client -- "WireGuard :51820" --> Daemon
+    Client -- "VLESS+REALITY :443" --> HAProxy
+    Client -- "HTTPS" --> HAProxy
 
-Форк развивался независимо от оригинала: `v0.2.0-cli-alpha` → `v0.2.1`
-(CLI-альфы) → `v0.3.0-cli` (первый стабильный релиз, без суффикса `-cli-alpha`).
-Ветка `main` форка — рабочая база релизов; актуальный бэкенд подтягивается
-точечной сверкой HTTP-API (см. [docs/RECONNECT.md](docs/RECONNECT.md)),
-полный бэкенд/фронтенд в форк не включён намеренно.
+    subgraph Moscow["Moscow VPS"]
+        HAProxy["<b>HAProxy</b><br/>TLS SNI routing"]
+        HAProxy -- "known web SNI :8443" --> Nginx
+        HAProxy -- "default backend :8444" --> Vless
+        Vless["<b>floppa-vless</b><br/>VLESS+REALITY proxy · per-user rate limits"]
+        Vless <-- "pg LISTEN / NOTIFY" --> DB
+        Vless -- "scrape :9103" --> VM
 
-## Требования
+        Nginx["<b>Nginx</b><br/>Reverse proxy + TLS"]
+        Nginx -- ":3000" --> Server
 
-- Linux (x86_64 или aarch64)
-- Права root — для поднятия TUN-интерфейса и записи маршрутов/DNS
-- Аккаунт на сервере Floppa VPN (токен выдаётся через `floppa-cli login`)
-- Утилиты: `ip`, `wg` (для WireGuard/AmneziaWG), `resolvectl` (при systemd-resolved)
+        Server["<b>floppa-server</b><br/>Telegram bot · REST API · Vue admin panel"]
+        Server <-- "pg LISTEN / NOTIFY" --> DB
+        Server -- "query traffic" --> VM
 
-## Установка
+        DB[("<b>PostgreSQL</b><br/>Source of truth")]
+        DB <-- "pg LISTEN / NOTIFY" --> Daemon
 
-### Из релиза (рекомендуется)
+        Daemon["<b>floppa-daemon</b><br/>WireGuard + AmneziaWG sync · tc HFSC rate limits"]
+        Daemon -- "scrape :9101" --> VM
 
-Скачайте бинарь под свою архитектуру со страницы
-[Releases](https://github.com/ni9aii/floppa-CLI/releases) и положите в `PATH`:
+        VM[("<b>VictoriaMetrics</b><br/>Traffic metrics")]
+    end
 
-```sh
-# пример для x86_64
-sudo curl -L -o /usr/local/bin/floppa-cli \
-  https://github.com/ni9aii/floppa-CLI/releases/latest/download/floppa-cli-linux-x86_64
-sudo chmod +x /usr/local/bin/floppa-cli
+    subgraph Europe["Europe VPS (exit node)"]
+        NAT["NAT to public internet"]
+    end
+
+    Daemon -- "site-to-site WG tunnel" --> NAT
+    Vless -- "UID policy route over site-to-site WG" --> NAT
 ```
 
-Подробный гайд с примерами конфигов и systemd — в [docs/SETUP.md](docs/SETUP.md).
+**How it works:** Server writes peer changes to PostgreSQL (e.g. `sync_status = 'pending_add'`) → DB trigger fires `pg_notify('peer_changed')` → daemon picks it up, syncs the peer to its protocol's interface (WireGuard via `wg`, AmneziaWG via `awg` — each peer carries a `protocol`), applies rate limits, and marks the peer active. HAProxy on Moscow sends VLESS/REALITY connections to the local `floppa-vless` process, which syncs its user registry from the same local database via `pg LISTEN/NOTIFY`. WireGuard, AmneziaWG, and VLESS egress are policy-routed through the site-to-site tunnel and NATed by Europe. Traffic metrics from both daemon and VLESS are scraped by VictoriaMetrics; the server queries VM to serve traffic stats in the API.
 
-### Из исходников
+## Features
 
-```sh
-git clone https://github.com/ni9aii/floppa-CLI
-cd floppa-CLI
-cargo build --release --manifest-path floppa-cli/Cargo.toml
-sudo cp floppa-cli/target/release/floppa-cli /usr/local/bin/
+### Daemon
+- Stateless WireGuard + AmneziaWG peer synchronization via `wg set` / `awg set` (one interface per protocol; AmneziaWG adds DPI-resistant obfuscation)
+- Per-peer HFSC traffic shaping (bidirectional — egress + IFB ingress)
+- Prometheus metrics endpoint — traffic counters scraped by VictoriaMetrics
+- Auto-runs database migrations on startup
+
+### VLESS Proxy
+- [shoes-lite](https://github.com/okhsunrog/shoes-lite) — VLESS+REALITY with Vision flow control
+- Per-user token-bucket rate limiting synced from subscription plans
+- Real-time user registry via `pg LISTEN/NOTIFY` + periodic full sync
+- Prometheus metrics endpoint for per-user traffic counters
+- Constant-time UUID comparison (timing-attack resistant)
+
+### Telegram Bot
+- User registration with automatic 7-day trial
+- Subscription status, language switching (en/ru)
+- Inline button to open the web app
+
+### Admin Panel
+- Dashboard with server stats and traffic overview
+- User management — create, search, subscription control
+- Plan management — speed limits, peer limits, pricing
+- Peer monitoring — sync status, traffic, last handshake
+- Paginated lists (users, peers, installations, VLESS) — 100 rows/page
+
+### Avatar Caching
+Telegram profile photos are served from a CDN that's unreachable from clients in Russia (and sends no CORS headers), so the server downloads each user's photo — via the Bot API (`getUserProfilePhotos` → `getFile`), falling back to the stored `photo_url` — caches it as a blob in PostgreSQL, and serves it from our own origin. Populated on demand (first avatar request triggers a background fetch) with a periodic TTL refresh; the admin user list fetches avatars for the visible page in one batch.
+
+### CLI Client
+- Standalone WireGuard / AmneziaWG / VLESS client (`floppa-cli`) for headless/server use (`--protocol`). Auto-reconnects after sleep/resume, Wi-Fi roaming, or transient outages — see [docs/RECONNECT.md](docs/RECONNECT.md) and `systemd/floppa-cli.service`.
+- Also used as the tunnel binary for integration tests
+
+### Client App (Tauri 2)
+- Cross-platform: Linux, Windows, Android
+- AmneziaWG (default), WireGuard, and VLESS+REALITY tunnel support
+- Split tunneling with per-app selection (Android)
+- WireGuard config persistence via OS keyring (desktop) or encrypted file (Android)
+- Deep-link authentication (Telegram Login Widget → JWT)
+- Two-process architecture on Android (VPN survives app swipe-close)
+
+## Client Architecture
+
+The client uses trait-based abstraction (`VpnBackend` + `Platform`) to share Tauri commands across platforms while handling OS differences underneath.
+
+**Language split:**
+
+- **Rust** — all VPN logic: WireGuard tunnel (gotatun), VLESS tunnel (shoes-lite), connection management, route/DNS/TUN setup, config persistence, IPC between processes, Tauri commands. The entire `VpnBackend` and `Platform` trait hierarchy is Rust
+- **TypeScript / Vue** — UI layer: connection controls, stats display, settings, split tunneling picker, update checks, theme management
+- **Kotlin** (Android only) — thin platform bridge via `tauri-plugin-vpn`: VPN service lifecycle, TUN fd creation, `VpnService.Builder` for split tunneling, foreground notification, system API access (battery optimization, notification permissions, status bar style, safe area insets, device name)
+
+### Desktop (Linux, Windows)
+
+```mermaid
+graph LR
+    subgraph "Single Process"
+        WebView["Vue WebView"]
+        Commands["Tauri Commands"]
+        Backend["InProcessBackend"]
+        Tunnel["gotatun tunnel<br/>(Mullvad WireGuard)"]
+        Platform["Platform trait<br/>Linux: pkexec + helper script<br/>Windows: netsh"]
+    end
+
+    WebView -- "tauri-specta" --> Commands
+    Commands --> Backend
+    Backend --> Tunnel
+    Commands --> Platform
+    Platform -- "routes, DNS,<br/>TUN device" --> OS["OS Network Stack"]
 ```
 
-> Нужны `libssl-dev` и `pkg-config` (для сборки TLS-зависимостей).
+Single-process: gotatun runs the WireGuard tunnel in-process. The `Platform` trait handles OS-specific network setup — Linux uses a polkit helper script for privilege escalation, Windows uses `netsh`. Config is persisted in the OS keyring (secret-service / DPAPI). Graceful cleanup on exit restores DNS and routes.
 
-## Быстрый старт
+### Android
 
-```sh
-# 1. Залогиниться (откроется браузер с Telegram OAuth)
-sudo floppa-cli login
+```mermaid
+graph LR
+    subgraph "UI Process"
+        WebView["Vue WebView"]
+        Commands["Tauri Commands"]
+        Plugin["tauri-plugin-vpn<br/>(Kotlin ↔ Rust)"]
+        IPC_Client["tarpc client"]
+    end
 
-# 2. Подключиться (протокол по умолчанию — wireguard)
-sudo floppa-cli connect
+    subgraph ":vpn Process"
+        Service["FloppaVpnService<br/>(foreground service)"]
+        JNI["JNI bridge"]
+        Tunnel["gotatun tunnel"]
+        IPC_Server["tarpc server"]
+    end
 
-# или явно указать протокол:
-sudo floppa-cli connect --protocol amneziawg
-sudo floppa-cli connect --protocol vless
+    WebView -- "tauri-specta" --> Commands
+    Commands --> Plugin
+    Plugin -- "startService()" --> Service
+    Service -- "TUN fd" --> JNI
+    JNI --> Tunnel
+    IPC_Client <-- "Unix socket<br/>(stats, stop)" --> IPC_Server
+    Tunnel -- "protectSocket()<br/>via JNI" --> Service
 ```
 
-После `connect` клиент создаёт (или переиспользует) peer для этого устройства,
-поднимает TUN-интерфейс и держит туннель, переподнимая его при обрывах.
+Two-process model so the VPN survives app swipe-close:
 
-## Команды
+**Single `.so`, two entry points, two processes** — Tauri compiles all Rust code into one `libfloppa_client_lib.so` with two entry points: the standard Tauri/JNI entry for the UI process, and `nativeInit` / `nativeStartTunnel` / `nativeStop` JNI exports for the VPN process. The Kotlin `FloppaVpnService` is declared with `android:process=":vpn"` in the manifest, so Android loads the same `.so` into a separate process. JNI statics (`JAVA_VM`, `TOKIO_RUNTIME`, `TUNNEL_MANAGER`) are per-process — each process gets its own isolated Rust state from the same binary.
 
-```
-floppa-cli [OPTIONS] <COMMAND>
+**Why tarpc?** Android's standard IPC (AIDL, Messenger) is Java/Kotlin-only — useless when both ends are Rust. gRPC adds HTTP/2 overhead. tarpc is pure Rust, async-native, and works directly over Unix domain sockets with bincode serialization. The UI process connects to `vpn.sock` in the app data directory to query stats or request stop.
 
-Commands:
-  login    Log in via Telegram (opens browser)
-  connect  Connect to VPN (auto-detects WireGuard/AmneziaWG .conf or VLESS URI)
-  peers    List your peers
-  config   Fetch and print config (WireGuard/AmneziaWG .conf or VLESS URI)
-  logout   Remove saved login token
-  service  Manage the systemd unit (install/uninstall the connector as a service)
-  help     Print this message or the help of the given subcommand(s)
-```
+**The flow:** `tauri-plugin-vpn` (Kotlin) starts `FloppaVpnService` as a foreground service → service creates TUN via Android's `VpnService.Builder` → passes the raw fd to Rust via JNI (`nativeStartTunnel`) → gotatun starts the WireGuard tunnel using that fd → tarpc server begins listening. When gotatun creates UDP sockets, it calls back into Kotlin via JNI (`protectSocket`) to mark them as bypass — preventing WireGuard packets from routing through the VPN itself. Split tunneling uses Android's per-app VPN API (`addAllowedApplication` / `addDisallowedApplication`).
 
-Полезные флаги:
+## Frontend Sharing
 
-- `--api-url <URL>` / переменная `FLOPPA_API_URL` — переопределить адрес сервера
-  (по умолчанию `https://floppa.okhsunrog.dev/api`)
-- `connect --config <FILE>` — подключиться по готовому `.conf` / VLESS-URI файлу
-- `connect --no-dns` — не трогать `/etc/resolv.conf` (оставить системный DNS)
-- `connect --interface <NAME>` — имя TUN-интерфейса (по умолчанию `floppa`)
+Three apps — admin panel (`floppa-face`), Tauri client (`floppa-client`), and Telegram Mini App — share a single codebase via the `floppa-web-shared` package in a Bun workspace.
 
-### Запуск как сервис (systemd)
+```mermaid
+graph TD
+    Shared["<b>floppa-web-shared</b><br/>Views · Components · Router · Stores<br/>OpenAPI client · i18n · Utils"]
 
-```sh
-# установить юнит, включить и сразу запустить
-sudo floppa-cli service install
+    Face["<b>floppa-face</b><br/>Admin panel<br/>Uses shared routes as-is"]
+    Client["<b>floppa-client</b><br/>Tauri app<br/>Overrides login + dashboard"]
+    MiniApp["<b>Telegram Mini App</b><br/>Same as admin panel<br/>Auto-login via initData"]
 
-# посмотреть, что сгенерирует юнит, без установки
-floppa-cli service print --config /etc/floppa-cli/client.conf
-
-# удалить
-sudo floppa-cli service uninstall
+    Shared --> Face
+    Shared --> Client
+    Shared --> MiniApp
 ```
 
-Юнит перезапускает клиент при падении (`Restart=on-failure`), а внутри клиента
-работает свой watchdog-реконнект (см. [docs/RECONNECT.md](docs/RECONNECT.md)).
+**How it works:**
 
-## Авто-восстановление
+- **Shared router** — `createAppRoutes()` returns all routes, `installAuthGuard()` adds auth checks. The admin panel uses them as-is; the client app overrides `login` and `dashboard` routes with its own components
+- **Slot-based composition** — shared views expose named slots (e.g. `UserDashboardView` has a `#vpn-widget` slot). The client fills it with `VpnCard`, the admin panel leaves it empty
+- **Three auth flows, one component** — the shared `LoginView` handles all three via props:
+  - *Admin panel* — embedded Telegram Login Widget (JavaScript callback)
+  - *Tauri client* — opens browser for Telegram OAuth, server redirects to `floppa://auth?token=...`, Tauri captures via deep-link plugin
+  - *Mini App* — auto-login with `window.Telegram.WebApp.initData` (no user interaction, already authenticated inside Telegram)
+- **OpenAPI → Pinia Colada** — the server generates an OpenAPI spec via utoipa, `@hey-api/openapi-ts` generates a typed SDK + Pinia Colada query/mutation hooks. All apps share the same auto-generated API client
+- **Nuxt UI v4 without Nuxt** — used as a Vue plugin (`@nuxt/ui/vue-plugin`) for the component library without the full Nuxt framework
+- **Tailwind v4 cross-scanning** — each app's CSS includes `@source "../../floppa-web-shared/src"` so Tailwind picks up classes from shared components
 
-Клиент следит за туннелем и пересобирает его при:
+## Tech Stack
 
-- выходе из сна (через systemd-logind `PrepareForSleep` на Linux),
-- периодической проверке здоровья (каждые ~30 с: свежесть WireGuard handshake
-  или доступность VLESS-эндпоинта),
-- фатальной ошибке (тогда управление передаётся systemd `Restart=on-failure`).
+| Layer | Tech |
+|-------|------|
+| Server | Rust, Axum, teloxide, sqlx, utoipa (OpenAPI), memory-serve |
+| Daemon | Rust, WireGuard (`wg`) + AmneziaWG (`awg`, kernel DKMS module), Linux tc HFSC, Prometheus metrics |
+| VLESS Proxy | Rust, [shoes-lite](https://github.com/okhsunrog/shoes-lite) (VLESS+REALITY+Vision), Prometheus metrics |
+| Frontend | Vue 3, Nuxt UI v4, Pinia Colada, Tailwind v4 |
+| Client | Tauri 2, gotatun (Mullvad WireGuard + AmneziaWG obfuscation), shoes-lite (VLESS), tauri-specta, custom tauri-plugin-vpn |
+| Database | PostgreSQL with LISTEN/NOTIFY |
+| Metrics | VictoriaMetrics (Prometheus-compatible TSDB) |
+| Crypto | x25519-dalek (WG keys), ChaCha20-Poly1305 (storage), XTLS REALITY, JWT |
 
-Подробнее: [docs/RECONNECT.md](docs/RECONNECT.md).
+## Development
 
-## Отличия от оригинала
+```bash
+# Prerequisites: Rust toolchain, Vite+ (`vp`), just
 
-Этот репозиторий — **только CLI-клиент**. Из оригинального floppa-vpn здесь
-присутствует лишь `floppa-cli/`. Бэкенд (daemon, server, Tauri-клиент, бот)
-намеренно удалён: клиенту он не нужен, он работает поверх публичного или
-вашего собственного сервера по HTTP API.
+# Install frontend dependencies
+vp install
 
-Релизы форка тегируются отдельно (без суффикса `-cli-alpha`), начиная с
-`v0.3.0-cli`.
+# Run all checks (fmt, clippy, tests, type-check, lint)
+just check
 
-## Сборка и CI
+# Dev servers
+cd floppa-face && vp dev               # Admin panel (proxies /api → :3000)
+cd floppa-client && vp exec tauri dev  # Client app
 
-- `ci.yml` проверяет `floppa-cli`: `cargo fmt --check`, `clippy -D warnings`,
-  `cargo test`.
-- `release.yml` собирает бинари `floppa-cli-linux-x86_64` и
-  `floppa-cli-linux-aarch64` по тегу `v*`.
+# Regenerate OpenAPI TypeScript client
+just openapi
 
-## Лицензия
+# Build Android APK
+just build-android
 
-MIT. См. [LICENSE](LICENSE).
+# Build deployment archive (frontend + server binaries)
+just package
+```
+
+## Deployment
+
+See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full guide. Ansible deploys across two VPS regions:
+
+- **Moscow** — `floppa-daemon` (root, WireGuard + tc), `floppa-server` (bot + API + embedded frontend), `floppa-vless` behind HAProxy, VictoriaMetrics, Grafana, nginx with Let's Encrypt
+- **Europe** — site-to-site WireGuard endpoint and NAT exit for all VPN protocols
+
+## License
+
+[GPL-3.0](LICENSE)
