@@ -46,4 +46,4 @@ jobs:
         with:
           draft: true
           generate_release_notes: true
-          files: target/release/floppa-cli
+          files: target/release/floppa-cli#floppa-cli-linux-x86_64
