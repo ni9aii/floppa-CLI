@@ -5,6 +5,44 @@ is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 for the CLI crate.
 
+## [0.5.0] - 2026-07-19
+
+CLI-only fork cleanup and repo hygiene.
+
+### Changed
+- **Repository is now CLI-only.** Removed the entire upstream server/desktop
+  stack that was still tracked from the `floppa-vpn` monorepo: `floppa-server`,
+  `floppa-daemon`, `floppa-vless`, `floppa-core`, `floppa-client` (Tauri),
+  `floppa-face`, `floppa-web-shared`, `tauri-plugin-vpn`, DB migrations,
+  `.sqlx`, Python integration tests, and the full multi-stack CI. The workspace
+  `Cargo.toml` now lists only `floppa-cli`; `ci.yml` keeps just the
+  `floppa-cli` fmt/clippy/test job.
+- `main` is the sole development branch (GitHub default). `develop`, the old
+  `feat/*` / `pr/*` branches were deleted. Feature/fix work now happens in
+  `fix/*` / `feat/*` branches merged into `main`.
+- `README.md` rewritten to describe only the CLI client (the upstream
+  daemon/bot/admin/Tauri docs were dropped). Broke links to removed server
+  docs (`DEPLOYMENT.md`, `LOGGING.md`, `SETUP.md`, `LOCAL-VPN-TESTING.md`)
+  and to the `cli-upstream-sync` branch.
+- `systemd/floppa-cli.service` and `floppa-cli/src/service.rs` point
+  `Documentation=` at `ni9aii/floppa-CLI/docs/RECONNECT.md`.
+- License normalized to GPL-3.0 across `Cargo.toml`, `LICENSE`, and
+  `README` (matching upstream).
+
+### Added
+- Restored CLI test scripts (`scripts/integration-test.sh`,
+  `scripts/smoke-test.sh`) that were dropped during the cleanup.
+
+### Removed
+- Server release workflows (`.github/workflows/release.yml`,
+  `mirror-release.yml`) and the `floppa-daemon` / `floppa-server` /
+  `floppa-vless` systemd units.
+
+### Notes
+- `floppa-CLI` is developed autonomously. Changes are reported upstream via
+  **Issues**, not PRs/merges (the fork history is unrelated to upstream after
+  the CLI-only rewrite).
+
 ## [0.3.0-cli] - 2026-07-18
 
 First stable release of the CLI-only connector (no `-cli-alpha` suffix).
