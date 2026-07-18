@@ -56,9 +56,11 @@ jobs:
           copy_one() {
             local glob="$1" dest="$2"
             local matches=( $glob )
-            if [ ${#matches[@]} -gt 0 ]; then
+            if [ ${#matches[@]} -gt 0 ] && [ -f "${matches[0]}" ]; then
               cp "${matches[0]}" "../mirror/$dest"
               echo "  ${matches[0]} -> $dest"
+            else
+              echo "  (skip $dest: not present)"
             fi
           }
 
