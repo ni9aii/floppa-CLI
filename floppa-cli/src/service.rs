@@ -36,7 +36,7 @@ fn render_unit(
     format!(
         "[Unit]\n\
          Description=Floppa VPN CLI client ({protocol})\n\
-         Documentation=https://github.com/okhsunrog/floppa-vpn/blob/main/docs/RECONNECT.md\n\
+         Documentation=https://github.com/ni9aii/floppa-CLI/blob/main/docs/RECONNECT.md\n\
          After=network-online.target\n\
          Wants=network-online.target\n\
          StartLimitIntervalSec=120\n\

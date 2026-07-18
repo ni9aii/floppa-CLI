@@ -29,7 +29,7 @@ First stable release of the CLI-only connector (no `-cli-alpha` suffix).
   - `docs/RECONNECT.md` describing the mechanism and tuning knobs.
 - **Docs rewritten for the CLI-only fork**: `README.md` now describes only the
   CLI client (not the upstream daemon/bot/admin/Tauri stack), plus a new
-  `docs/SETUP.md` install/usage guide.
+  rewritten README install/usage section.
 - `systemd/floppa-cli.service` — example unit with `Restart=on-failure` so a
   fatal CLI exit is recovered by systemd (the in-process reconnect loop covers
   transient drops on its own).

@@ -1,6 +1,6 @@
 [Unit]
 Description=Floppa VPN CLI client (WireGuard / AmneziaWG / VLESS)
-Documentation=https://github.com/okhsunrog/floppa-vpn/blob/main/docs/RECONNECT.md
+Documentation=https://github.com/ni9aii/floppa-CLI/blob/main/docs/RECONNECT.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=120

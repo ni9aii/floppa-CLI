@@ -85,4 +85,5 @@ reconnect: reconnect failed (attempt 1) — ...; retrying in 2.0s
 reconnect: tunnel rebuilt successfully
 ```
 
-Set `RUST_LOG=debug` (or `info`) for the full trail — see [LOGGING.md](LOGGING.md).
+Set `RUST_LOG=debug` (or `info`) for the full trail, or pass `--log-file <path>` to write logs to a
+file (see the README "Usage" section).

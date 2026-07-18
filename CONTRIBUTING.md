@@ -28,17 +28,18 @@ floppa-CLI/                 workspace root (this repo)
 
 ```bash
 # Build (needs network plumbing deps; runs as root to actually connect)
-just build            # or: cargo build -p floppa-cli
+cargo build -p floppa-cli
 
 # Lint + test
-just lint             # cargo clippy -- -D warnings
-just test             # cargo test
-
-# Run against a local test setup (see docs/LOCAL-VPN-TESTING.md)
-sudo cargo run -p floppa-cli -- <config> --no-dns
+cargo clippy -p floppa-cli -- -D warnings
+cargo test -p floppa-cli
 ```
 
-`just` is the task runner — `just --list` shows every target.
+# Run against a local server (supply a .conf or vless:// file)
+sudo cargo run -p floppa-cli -- connect --config <config> --no-dns
+```
+
+`cargo` is the build tool — the commands below mirror what CI runs.
 
 ## Before you open a PR
 
@@ -55,8 +56,7 @@ sudo cargo run -p floppa-cli -- <config> --no-dns
 
 - Small, focused commits. One logical change per commit.
 - Write the *why*, not the *what* — the diff already shows the what.
-- PRs target the `cli-upstream-sync` branch (the sync fork's integration
-  branch), not `main`, unless you know what you're doing.
+- PRs target `main`, unless you know what you're doing.
 
 ## Code notes
 
